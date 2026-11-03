@@ -1,0 +1,9 @@
+# nunca publique arquivos do jogo
+baserom/
+*.iso
+asm/
+assets/
+build/
+config/auto/
+tools/bin/
+__pycache__/

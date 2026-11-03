@@ -1,0 +1,64 @@
+# Naruto Shippuden: Ultimate Ninja 4 (USA) - SLUS-21862
+name: Naruto Shippuden Ultimate Ninja 4 (USA)
+sha1: 2f476d213971e10259d1d5ead3352b52a6715f98
+options:
+  basename: SLUS_218.62
+  target_path: baserom/SLUS_218.62.rom
+  elf_path: build/SLUS_218.62.elf
+  base_path: ..
+  platform: ps2
+  compiler: MWCCPS2
+
+  gp_value: 0x0060EF70
+
+  asm_path: asm
+  src_path: src
+  build_path: build
+  asset_path: assets
+  ld_script_path: build/SLUS_218.62.ld
+  ld_dependencies: False
+
+  symbol_addrs_path:
+    - config/symbol_addrs.txt
+  undefined_funcs_auto_path: config/auto/undefined_funcs_auto.txt
+  undefined_syms_auto_path: config/auto/undefined_syms_auto.txt
+
+  find_file_boundaries: False
+  string_encoding: ASCII
+  data_string_encoding: ASCII
+  rodata_string_guesser_level: 2
+  data_string_guesser_level: 2
+  named_regs_for_c_funcs: False
+  section_order: [.text, .data, .rodata, .sdata, .sbss, .bss]
+
+segments:
+  - name: main
+    type: code
+    start: 0x000000
+    vram: 0x00100000
+    subalign: null
+    subsegments:
+      - [0x000000, asm, main/text]
+  - name: data_a
+    type: code
+    start: 0x2F6180
+    vram: 0x003F6180
+    subalign: null
+    subsegments:
+      - [0x2F6180, bin, main/data_2F6180]
+  - name: late
+    type: code
+    start: 0x4D9000
+    vram: 0x005D9000
+    subalign: null
+    subsegments:
+      - [0x4D9000, asm, main/late_text]
+  - name: data_b
+    type: code
+    start: 0x4EAA00
+    vram: 0x005EAA00
+    bss_size: 0x294480
+    subalign: null
+    subsegments:
+      - [0x4EAA00, bin, main/data_4EAA00]
+  - [0x509500]
