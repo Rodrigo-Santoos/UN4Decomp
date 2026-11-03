@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """Baixa as ferramentas usadas pelo projeto para tools/bin/ (Linux x86-64 ou WSL)."""
 import hashlib, io, os, stat, tarfile, urllib.request
+
+
+def make_exec(p):
+    try:
+        p.chmod(p.stat().st_mode | stat.S_IEXEC)
+    except PermissionError:
+        raise SystemExit(
+            "Nao consegui marcar as ferramentas como executaveis nesta pasta.\n"
+            "Isso acontece em pastas do Windows/OneDrive (/mnt/c/...).\n"
+            "Copie o projeto para dentro do Linux e rode de la, por exemplo:\n"
+            "  cp -r \"$PWD\" ~/UN4Decomp && cd ~/UN4Decomp && rm -rf tools/bin && python3 tools/setup_tools.py")
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,14 +43,14 @@ def main():
             if hashlib.sha256(data).hexdigest() != sha:
                 raise SystemExit(f"hash errado para {name}")
             p.write_bytes(data)
-            p.chmod(p.stat().st_mode | stat.S_IEXEC)
+            make_exec(p)
     for name, url in TARS.items():
         d = BIN / name
         if not d.exists():
             d.mkdir(parents=True)
             tarfile.open(fileobj=io.BytesIO(get(url))).extractall(d)
             for f in d.iterdir():
-                f.chmod(f.stat().st_mode | stat.S_IEXEC)
+                make_exec(f)
     print("Ferramentas prontas em tools/bin/")
 
 if __name__ == "__main__":
