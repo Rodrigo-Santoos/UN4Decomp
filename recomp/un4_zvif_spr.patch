@@ -1,0 +1,371 @@
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -2,6 +2,10 @@
+ #include "runtime/ps2_address.h"
+ #include "runtime/gs/gs_frontend.h"
+ #include "ps2_log.h"
++#include "un4_dma_diag.h"
++#include <iostream>
++#include <mutex>
++#include <unordered_map>
+ #include <atomic>
+ #include <cstring>
+ #include <limits>
+@@ -522,6 +526,102 @@
+     return nearest;
+ }
+ 
++namespace un4dma
++{
++    namespace
++    {
++        std::mutex &registryMutex()
++        {
++            static std::mutex m;
++            return m;
++        }
++        std::unordered_map<const uint8_t *, std::vector<Seg>> &registry()
++        {
++            static std::unordered_map<const uint8_t *, std::vector<Seg>> r;
++            return r;
++        }
++    }
++
++    void registerSegs(const uint8_t *key, std::vector<Seg> &&segs)
++    {
++        std::lock_guard<std::mutex> lock(registryMutex());
++        registry()[key] = std::move(segs);
++    }
++
++    void forget(const uint8_t *key)
++    {
++        std::lock_guard<std::mutex> lock(registryMutex());
++        registry().erase(key);
++    }
++
++    bool lookup(const uint8_t *key, uint32_t off, Seg &out)
++    {
++        std::lock_guard<std::mutex> lock(registryMutex());
++        auto it = registry().find(key);
++        if (it == registry().end())
++            return false;
++        for (const Seg &s : it->second)
++        {
++            if (off >= s.bufOff && off < s.bufOff + s.bytes)
++            {
++                out = s;
++                return true;
++            }
++        }
++        return false;
++    }
++
++    void dumpChain(const uint8_t *key, int maxLines)
++    {
++        std::lock_guard<std::mutex> lock(registryMutex());
++        auto it = registry().find(key);
++        if (it == registry().end())
++        {
++            std::cerr << "[un4dma]   (cadeia nao registrada)" << std::endl;
++            return;
++        }
++        int lines = 0;
++        for (const Seg &s : it->second)
++        {
++            if (s.tagUpper)
++                continue;
++            if (++lines > maxLines)
++            {
++                std::cerr << "[un4dma]   ... (" << it->second.size() << " pedacos no total)" << std::endl;
++                break;
++            }
++            std::cerr << "[un4dma]   buf+0x" << std::hex << s.bufOff << " tag@0x" << s.tagAddr << " tag=0x" << s.tag
++                      << " id=" << ((s.tag >> 28) & 7u) << " qwc=0x" << (s.tag & 0xFFFFu) << " dados@0x" << s.guest
++                      << " bytes=0x" << s.bytes << std::dec << std::endl;
++        }
++    }
++}
++
++namespace
++{
++    // UN4Decomp: no DMAC o bit 31 de MADR/TADR (e o bit 63 da tag, que e o bit 31 do campo ADDR) escolhe a
++    // scratchpad (SPR): o endereco vira um deslocamento dentro dos 16KB dela. O runtime tratava 0x8000xxxx
++    // como KSEG0 (RAM baixa), lendo a memoria errada.
++    uint32_t un4DmaSprAddress(uint32_t addr, uint32_t channelBase, const char *what)
++    {
++        if ((addr & 0x80000000u) == 0u || ps2IsScratchpadAddress(addr))
++            return addr;
++        static std::atomic<uint32_t> s_logged{0};
++        if (s_logged.fetch_add(1, std::memory_order_relaxed) < 12u)
++            std::cerr << "[un4dma] canal 0x" << std::hex << channelBase << " " << what << " com bit SPR: 0x" << addr
++                      << " -> scratchpad+0x" << (addr & 0x3FF0u) << std::dec << std::endl;
++        return PS2_SCRATCHPAD_BASE | (addr & 0x3FF0u);
++    }
++
++    uint32_t un4DmaRegisterAddress(uint32_t addr)
++    {
++        // Ao devolver MADR/TADR para o jogo, a scratchpad volta a ser indicada pelo bit 31.
++        if (addr >= PS2_SCRATCHPAD_BASE && addr < PS2_SCRATCHPAD_BASE + PS2_SCRATCHPAD_SIZE)
++            return 0x80000000u | (addr - PS2_SCRATCHPAD_BASE);
++        return addr;
++    }
++}
++
+ bool PS2Memory::isScratchpad(uint32_t address) const
+ {
+     return ps2IsScratchpadAddress(address);
+@@ -1335,11 +1435,16 @@
+ 
+                 if (mode == 0 && qwc > 0)
+                 {
+-                    enqueueTransfer(madr, qwc);
++                    enqueueTransfer(un4DmaSprAddress(madr, channelBase, "MADR"), qwc);
+                 }
+                 else if (mode == 1)
+                 {
+-                    uint32_t tagAddr = m_ioRegisters[channelBase + 0x30];
++                    uint32_t tagAddr = un4DmaSprAddress(m_ioRegisters[channelBase + 0x30], channelBase, "TADR");
++                    // UN4Decomp (diagnostico): origem de cada pedaco do buffer da cadeia (so VIF1)
++                    const bool un4TrackSegs = (channelBase == 0x10009000u);
++                    std::vector<un4dma::Seg> un4Segs;
++                    uint64_t un4CurTag = 0;
++                    uint32_t un4CurTagAddr = 0;
+                     uint32_t asr0 = m_ioRegisters[channelBase + 0x40];
+                     uint32_t asr1 = m_ioRegisters[channelBase + 0x50];
+                     uint32_t asp = (chcr >> 4) & 0x3u;
+@@ -1354,6 +1459,17 @@
+                         const bool scratch = isScratchpad(srcAddr);
+                         uint32_t src = 0;
+                         src = translateAddress(srcAddr);
++                        if (un4TrackSegs)
++                        {
++                            un4dma::Seg seg;
++                            seg.bufOff = static_cast<uint32_t>(chainBuf.size());
++                            seg.bytes = bytes;
++                            seg.guest = srcAddr;
++                            seg.tagAddr = un4CurTagAddr;
++                            seg.tag = un4CurTag;
++                            seg.tagUpper = false;
++                            un4Segs.push_back(seg);
++                        }
+                         const uint8_t *base2;
+                         uint32_t maxSz2;
+                         if (scratch)
+@@ -1395,6 +1511,17 @@
+ 
+                         // CHCR.TTE sends the DMAtag's upper 64 bits to the channel before
+                         // the tag payload. VIF chains use those bytes for two VIFcodes.
++                        if (un4TrackSegs)
++                        {
++                            un4dma::Seg seg;
++                            seg.bufOff = static_cast<uint32_t>(chainBuf.size());
++                            seg.bytes = 8u;
++                            seg.guest = localTagAddr + 8u;
++                            seg.tagAddr = localTagAddr;
++                            seg.tag = un4CurTag;
++                            seg.tagUpper = true;
++                            un4Segs.push_back(seg);
++                        }
+                         chainBuf.insert(chainBuf.end(), localBase + tagPhys + 8u, localBase + tagPhys + 16u);
+                     };
+ 
+@@ -1443,8 +1570,12 @@
+                         uint32_t id = static_cast<uint32_t>((tag >> 28) & 0x7);
+                         const bool irq = ((tag >> 31) & 0x1ull) != 0ull;
+                         uint32_t addr = static_cast<uint32_t>((tag >> 32) & 0x7FFFFFFF);
++                        if ((tag >> 63) & 1ull)
++                            addr = un4DmaSprAddress(addr | 0x80000000u, channelBase, "tag");
+                         lastTagUpper = static_cast<uint32_t>((tag >> 16) & 0xFFFFu);
+                         ++tagsProcessed;
++                        un4CurTag = tag;
++                        un4CurTagAddr = currentTagAddr;
+ 
+                         uint32_t dataAddr = 0;
+                         bool hasPayload = (tagQwc > 0);
+@@ -1527,8 +1658,8 @@
+                             break;
+                     }
+ 
+-                    m_ioRegisters[channelBase + 0x30] = tagAddr;
+-                    m_ioRegisters[channelBase + 0x10] = lastMadr;
++                    m_ioRegisters[channelBase + 0x30] = un4DmaRegisterAddress(tagAddr);
++                    m_ioRegisters[channelBase + 0x10] = un4DmaRegisterAddress(lastMadr);
+                     m_ioRegisters[channelBase + 0x40] = asr0;
+                     m_ioRegisters[channelBase + 0x50] = asr1;
+                     chcr = (chcr & ~(0x3u << 4)) | ((asp & 0x3u) << 4);
+@@ -1542,6 +1673,8 @@
+                         pt.srcAddr = 0;
+                         pt.qwc = 0;
+                         pt.chainData = std::move(chainBuf);
++                        if (un4TrackSegs)
++                            un4dma::registerSegs(pt.chainData.data(), std::move(un4Segs));
+                         if (channelBase == 0x1000A000)
+                         {
+                             m_pendingGifTransfers.push_back(std::move(pt));
+@@ -1817,6 +1950,7 @@
+         if (!p.chainData.empty())
+         {
+             processVIF1Data(p.chainData.data(), static_cast<uint32_t>(p.chainData.size()));
++            un4dma::forget(p.chainData.data());
+         }
+         else if (p.qwc > 0)
+         {
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -3,6 +3,10 @@
+ // Based on Blackline Interactive implementation
+ #include "runtime/ps2_memory.h"
+ #include <cstring>
++#include <cstdio>
++#include <cstdlib>
++#include <string>
++#include "un4_dma_diag.h"
+ 
+ enum VIFCmd : uint8_t
+ {
+@@ -83,6 +87,105 @@
+     }
+ }
+ 
++namespace
++{
++    // UN4Decomp (diagnostico): o VU1 da luta le a matriz da camera em VU1[0..3] (LQ 0..3(vi0)). Quando ela chega
++    // com lixo (expoente 255 = 0x7fffffff etc.) registra de onde o DMA trouxe esses dados e grava a RAM do EE.
++    bool un4WordInsane(uint32_t w)
++    {
++        return (w & 0x7F800000u) == 0x7F800000u;
++    }
++
++    void un4DumpEeRam(const uint8_t *rdram, const uint8_t *spr, const uint8_t *vu1Data, const uint8_t *vu1Code, uint64_t n)
++    {
++        const char *dir = std::getenv("UN4_GSDUMP_DIR");
++        std::string path = std::string(dir && *dir ? dir : ".") + "/eeram_" + std::to_string(n) + ".bin";
++        std::FILE *f = std::fopen(path.c_str(), "wb");
++        if (!f)
++        {
++            std::cerr << "[un4cam] nao consegui criar " << path << std::endl;
++            return;
++        }
++        static const uint8_t zeros[16384] = {};
++        std::fwrite("UN4RAM01", 1, 8, f);
++        std::fwrite(rdram, 1, PS2_RAM_SIZE, f);
++        std::fwrite(spr ? spr : zeros, 1, PS2_SCRATCHPAD_SIZE, f);
++        std::fwrite(vu1Data ? vu1Data : zeros, 1, 16384, f);
++        std::fwrite(vu1Code ? vu1Code : zeros, 1, 16384, f);
++        std::fclose(f);
++        std::cerr << "[un4cam] RAM do EE gravada em " << path << std::endl;
++    }
++
++    void un4CheckCameraUpload(const uint8_t *data, uint32_t pos, uint32_t sizeBytes, uint32_t cmd, uint32_t vuAddr,
++                              uint32_t writeCount, const VIFRegisters &regs, const uint8_t *rdram, const uint8_t *spr,
++                              const uint8_t *vu1Data, const uint8_t *vu1Code)
++    {
++        static uint64_t s_count = 0;
++        static uint32_t s_insaneLogged = 0;
++        static bool s_lastInsane = false;
++        static bool s_dumped = false;
++        ++s_count;
++        const uint8_t opcode = static_cast<uint8_t>((cmd >> 24) & 0x7Fu);
++        const bool v4_32 = (opcode & 0x6Fu) == 0x6Cu;
++        uint32_t words[16] = {};
++        const uint32_t avail = (sizeBytes > pos) ? (sizeBytes - pos) : 0u;
++        const uint32_t copy = std::min<uint32_t>(avail, v4_32 ? std::min<uint32_t>(writeCount, 4u) * 16u : 16u);
++        std::memcpy(words, data + pos, copy);
++        bool insane = false;
++        if (v4_32)
++            for (uint32_t i = 0; i < copy / 4u; ++i)
++                insane = insane || un4WordInsane(words[i]);
++
++        const bool transition = insane != s_lastInsane;
++        const bool log = s_count <= 6u || transition || (insane && s_insaneLogged < 8u) || (s_count % 3000u) == 0u;
++        s_lastInsane = insane;
++        if (!log)
++            return;
++        if (insane)
++            ++s_insaneLogged;
++
++        const uint8_t *src = data + pos;
++        uint32_t guest = 0u;
++        const char *kind = "?";
++        un4dma::Seg seg;
++        bool haveSeg = false;
++        if (rdram && src >= rdram && src < rdram + PS2_RAM_SIZE)
++        {
++            guest = static_cast<uint32_t>(src - rdram);
++            kind = "RAM";
++        }
++        else if (spr && src >= spr && src < spr + PS2_SCRATCHPAD_SIZE)
++        {
++            guest = PS2_SCRATCHPAD_BASE + static_cast<uint32_t>(src - spr);
++            kind = "SPR";
++        }
++        else if (un4dma::lookup(data, pos, seg))
++        {
++            guest = seg.guest + (pos - seg.bufOff);
++            kind = seg.tagUpper ? "tag(TTE)" : "cadeia";
++            haveSeg = true;
++        }
++
++        std::cerr << "[un4cam] #" << s_count << (insane ? " LIXO" : " ok") << " cmd=0x" << std::hex << cmd << " vu=0x" << vuAddr
++                  << " tops=0x" << regs.tops << " base=0x" << regs.base << " ofst=0x" << regs.ofst << " cycle=0x" << regs.cycle
++                  << " mode=" << regs.mode << " origem=" << kind << ":0x" << guest;
++        if (haveSeg)
++            std::cerr << " (tag@0x" << seg.tagAddr << " tag=0x" << seg.tag << ")";
++        std::cerr << " dados:";
++        for (uint32_t i = 0; i < copy / 4u; ++i)
++            std::cerr << ((i % 4u) == 0u ? " | " : " ") << words[i];
++        std::cerr << std::dec << std::endl;
++
++        if (insane && !s_dumped)
++        {
++            s_dumped = true;
++            std::cerr << "[un4cam] cadeia de DMA que trouxe a matriz com lixo:" << std::endl;
++            un4dma::dumpChain(data, 160);
++            un4DumpEeRam(rdram, spr, vu1Data, vu1Code, s_count);
++        }
++    }
++}
++
+ void PS2Memory::processVIF0Data(uint32_t srcPhys, uint32_t sizeBytes)
+ {
+     if (sizeBytes == 0u || srcPhys >= PS2_RAM_SIZE)
+@@ -621,6 +724,10 @@
+ 
+             const bool zeroExtend = (imm & 0x4000u) != 0u;
+ 
++            if (vuAddr == 0u && m_vu1Data)
++                un4CheckCameraUpload(data, pos, sizeBytes, cmd, vuAddr, writeVectorCount, vif1_regs, m_rdram, m_scratchpad,
++                                     m_vu1Data, m_vu1Code);
++
+             if (m_vu1Data && totalBytes > 0 && pos + totalBytes <= sizeBytes)
+             {
+                 const uint8_t *srcBase = data + pos;
+--- /dev/null
++++ b/ps2xRuntime/src/lib/un4_dma_diag.h
+@@ -0,0 +1,26 @@
++#pragma once
++// UN4Decomp (diagnostico): de onde vieram os dados que o VIF1 recebeu numa cadeia de DMA.
++// O construtor da cadeia (ps2_memory.cpp) junta tudo num buffer so; aqui fica, para cada pedaco do
++// buffer, o endereco original no EE e a tag de DMA que o trouxe.
++#include <cstdint>
++#include <vector>
++
++namespace un4dma
++{
++    struct Seg
++    {
++        uint32_t bufOff = 0;  // posicao no buffer da cadeia
++        uint32_t bytes = 0;   // tamanho do pedaco
++        uint32_t guest = 0;   // endereco no EE (0x7000xxxx = scratchpad)
++        uint32_t tagAddr = 0; // endereco da tag de DMA
++        uint64_t tag = 0;     // tag (64 bits de baixo)
++        bool tagUpper = false; // true: os 8 bytes de cima da tag (TTE), false: dados
++    };
++
++    void registerSegs(const uint8_t *key, std::vector<Seg> &&segs);
++    void forget(const uint8_t *key);
++    // Endereco no EE do byte 'off' do buffer 'key'. Falso se o buffer nao veio de uma cadeia registrada.
++    bool lookup(const uint8_t *key, uint32_t off, Seg &out);
++    // Lista (no stderr) as tags da cadeia, no maximo 'maxLines' linhas.
++    void dumpChain(const uint8_t *key, int maxLines);
++}

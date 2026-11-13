@@ -1,0 +1,26 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1911,11 +1911,20 @@
+         {
+             if (scheduled.event.type == EeEventType::VBlankStart)
+             {
++                // UN4Decomp: se o jogo ficou para tras do relogio (um trecho lento), nao tenta recuperar o tempo
++                // perdido. Antes os vblanks atrasados disparavam em rajada (ate ~270 por segundo) e o jogo e os
++                // videos ficavam acelerados depois de cada engasgo. Agora o proximo vblank conta a partir de agora.
++                auto hostBase = scheduled.hostDeadline;
++                const auto hostNow = std::chrono::steady_clock::now();
++                if (hostBase + 2 * kVBlankPeriod < hostNow)
++                {
++                    hostBase = hostNow;
++                }
+                 scheduleEvent(scheduled.deadlineCycle + kVBlankDurationCycles,
+-                              scheduled.hostDeadline + kVBlankDuration,
++                              hostBase + kVBlankDuration,
+                               EeEvent{EeEventType::VBlankEnd, 0, m_vsyncTick + 1u});
+                 scheduleEvent(scheduled.deadlineCycle + kVBlankPeriodCycles,
+-                              scheduled.hostDeadline + kVBlankPeriod,
++                              hostBase + kVBlankPeriod,
+                               EeEvent{EeEventType::VBlankStart, 0, 0});
+             }
+             processEvent(scheduled.event);

@@ -57,8 +57,17 @@ def main():
     src = ROOT / "src/main" / f"{a.func}.c"
     if not src.exists():
         sys.exit(f"crie {src.relative_to(ROOT)} primeiro")
-    run([WIBO, MWCC_DIR / a.compiler / "mwccps2.exe", "-c", "-lang", "c", "-nostdinc", *a.flags.split(),
-         "-I" + str(ROOT / "include"), "-o", out / "base.o", src], cwd=ROOT)
+    cdir = MWCC_DIR / a.compiler
+    if a.compiler.startswith("ee-gcc"):
+        # EE-GCC da Sony (binario Linux 32 bits: precisa de libc6:i386, veja tools/setup_eegcc.sh)
+        gcc = cdir / "bin/ee-gcc"
+        libdirs = [p for p in (cdir / "lib/gcc-lib/ee").glob("*") if p.is_dir()]
+        bflags = [f"-B{cdir / 'bin'}/"] + [f"-B{d}/" for d in libdirs]
+        flags = a.flags.split() if a.flags != DEFAULT_FLAGS else ["-O2", "-G0"]
+        run([gcc, *bflags, "-c", *flags, "-I" + str(ROOT / "include"), "-o", out / "base.o", src], cwd=ROOT)
+    else:
+        run([WIBO, cdir / "mwccps2.exe", "-c", "-lang", "c", "-nostdinc", *a.flags.split(),
+             "-I" + str(ROOT / "include"), "-o", out / "base.o", src], cwd=ROOT)
 
     r = run([OBJDIFF, "diff", "-1", out / "target.o", "-2", out / "base.o", "-o", "-", "--format", "json", a.func])
     data = json.loads(r.stdout)

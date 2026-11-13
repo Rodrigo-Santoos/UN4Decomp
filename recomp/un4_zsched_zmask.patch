@@ -1,0 +1,63 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -165,6 +165,19 @@
+     publishSnapshot();
+ }
+ 
++// UN4Decomp: a thread atual desligou as interrupcoes (DI / DIntr: bit EIE do Status do COP0 zerado)?
++// No PS2 nenhuma interrupcao chega enquanto isso: nada de handler de vblank/alarme/DMA e nenhuma troca de thread
++// causada por eles. O jogo usa DIntr/EIntr para proteger o gerenciador de memoria dele; antes as interrupcoes
++// e as trocas de thread aconteciam no meio dessas partes protegidas e a lista de memoria livre do jogo se
++// corrompia (a carga travava em 14% com uma thread dando voltas para sempre na lista).
++static bool un4InterruptsMasked(const GuestThread *thread)
++{
++    if (!thread)
++        return false;
++    const R5900Context &context = const_cast<GuestThread *>(thread)->activeContext();
++    return (context.cop0_status & 0x10000u) == 0u;
++}
++
+ void EeScheduler::run()
+ {
+     assertExecutor();
+@@ -172,7 +185,8 @@
+ 
+     while (!m_stopRequested.load(std::memory_order_acquire))
+     {
+-        processPendingEvents();
++        if (!un4InterruptsMasked(currentThread()))
++            processPendingEvents();
+         if (m_stopRequested.load(std::memory_order_acquire))
+         {
+             break;
+@@ -332,7 +346,8 @@
+             throw;
+         }
+ 
+-        processPendingEvents();
++        if (!un4InterruptsMasked(currentThread()))
++            processPendingEvents();
+         if (m_rescheduleRequested && m_currentThreadId != 0)
+         {
+             GuestThread *preempted = currentThread();
+@@ -377,8 +392,17 @@
+ {
+     accountCycles(cycles);
+ 
+-    if (m_checkpointPending.load(std::memory_order_acquire) ||
+-        m_stopRequested.load(std::memory_order_acquire))
++    if (m_stopRequested.load(std::memory_order_acquire))
++    {
++        return true;
++    }
++    if (un4InterruptsMasked(currentThread()))
++    {
++        // as interrupcoes ficam pendentes ate o EI
++        return false;
++    }
++
++    if (m_checkpointPending.load(std::memory_order_acquire))
+     {
+         return true;
+     }

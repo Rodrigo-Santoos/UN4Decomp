@@ -1,0 +1,41 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -2081,6 +2081,37 @@
+                     }
+                 }
+                 std::cerr << std::dec << std::endl;
++                // UN4Decomp (diagnostico): thread presa rodando no mesmo pc -> registradores e a memoria apontada por eles
++                if (t.status == EeThreadStatus::Running && m_rdram)
++                {
++                    static const char *kRegNames[32] = {"zr", "at", "v0", "v1", "a0", "a1", "a2", "a3", "t0", "t1", "t2",
++                                                        "t3", "t4", "t5", "t6", "t7", "s0", "s1", "s2", "s3", "s4", "s5",
++                                                        "s6", "s7", "t8", "t9", "k0", "k1", "gp", "sp", "fp", "ra"};
++                    std::cerr << "[un4regs] id=" << id << std::hex;
++                    for (int r = 1; r < 32; ++r)
++                        std::cerr << " " << kRegNames[r] << "=" << getRegU32(&c, r);
++                    std::cerr << std::dec << std::endl;
++                    for (int r : {4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23, 30})
++                    {
++                        const uint32_t addr = getRegU32(&c, r) & 0x1FFFFFFCu;
++                        if (addr < 0x100000u || addr + 64u > 0x2000000u)
++                            continue;
++                        std::cerr << "[un4regs]   " << kRegNames[r] << " @0x" << std::hex << addr << ":";
++                        for (uint32_t off = 0; off < 64u; off += 4u)
++                        {
++                            uint32_t w = 0;
++                            std::memcpy(&w, m_rdram + addr + off, 4);
++                            std::cerr << " " << w;
++                        }
++                        std::cerr << "  \"";
++                        for (uint32_t off = 0; off < 48u; ++off)
++                        {
++                            const char ch = static_cast<char>(m_rdram[addr + off]);
++                            std::cerr << ((ch >= 32 && ch < 127) ? ch : '.');
++                        }
++                        std::cerr << "\"" << std::dec << std::endl;
++                    }
++                }
+             }
+         }
+         if (m_gsVSyncCallback != 0u && m_runtime.hasFunction(m_gsVSyncCallback))

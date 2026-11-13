@@ -7,3 +7,32 @@ build/
 config/auto/
 tools/bin/
 __pycache__/
+recomp/game/
+recomp/build/
+recomp/PS2Recomp/
+recomp/run.log
+recomp/.iso_path
+
+# pedacos do jogo e capturas de teste (imagem, som e memoria do jogo): nunca publique
+_tmp_prg/
+gsdump/
+run_log.gz
+*.bin
+*.bin.gz
+*.BIN
+*.elf
+*.wav
+# logs de diagnostico soltos na raiz
+/adx.txt
+/boot.txt
+/gs_history_frame_*.txt
+/gs_idioma.txt
+/intro.txt
+/menu.txt
+/mov*.txt
+/pad.txt
+/peek.txt
+/prof.txt
+/thr*.txt
+/trace.txt
+/vif.txt

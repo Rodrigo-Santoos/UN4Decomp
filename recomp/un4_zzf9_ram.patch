@@ -1,0 +1,37 @@
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -7,6 +7,7 @@
+ #include "ps2_runtime_macros.h"
+ #include "runtime/gs/gs_frontend.h"
+ #include "runtime/gs/un4_gsdump.h"
++#include "un4_profile.h"
+ #include "runtime/ee_scheduler.h"
+ #include "ThreadNaming.h"
+ #include "Kernel/Stubs/Audio.h"
+@@ -382,6 +383,26 @@
+     {
+         un4gsdump::request(0u);
+         std::cerr << "[un4gsdump] F9 apertado: gravando o proximo quadro" << std::endl;
++        // UN4Decomp (diagnostico): lista todas as funcoes do jogo chamadas desde a ultima marca de 300 vblanks
++        un4prof::dumpAll(0u);
++        // UN4Decomp (diagnostico): o F9 tambem grava a memoria do EE (RAM + scratchpad + memoria do VU1)
++        if (rt)
++        {
++            static int s_un4RamDumps = 0;
++            const std::string path = un4gsdump::dir() + "/eeram_f9_" + std::to_string(++s_un4RamDumps) + ".bin";
++            PS2Memory &mem = rt->memory();
++            if (FILE *f = std::fopen(path.c_str(), "wb"))
++            {
++                static const uint8_t zeros[16384] = {};
++                std::fwrite("UN4RAM01", 1, 8, f);
++                std::fwrite(mem.getRDRAM(), 1, PS2_RAM_SIZE, f);
++                std::fwrite(mem.getScratchpad() ? mem.getScratchpad() : zeros, 1, PS2_SCRATCHPAD_SIZE, f);
++                std::fwrite(mem.getVU1Data() ? mem.getVU1Data() : zeros, 1, 16384, f);
++                std::fwrite(mem.getVU1Code() ? mem.getVU1Code() : zeros, 1, 16384, f);
++                std::fclose(f);
++                std::cerr << "[un4gsdump] memoria do EE gravada em " << path << std::endl;
++            }
++        }
+     }
+     static uint64_t s_lastPresentationTick = std::numeric_limits<uint64_t>::max();
+     static bool s_hasLatchedInitialFrame = false;

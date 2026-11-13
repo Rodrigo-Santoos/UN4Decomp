@@ -1,0 +1,50 @@
+diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
+index 37b6a4d..20c6727 100644
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -1404,6 +1404,10 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+ 
+                     int tagsProcessed = 0;
+                     uint32_t lastTagUpper = (chcr >> 16) & 0xFFFFu;
++                    // UN4Decomp: MADR precisa apontar para o fim do ultimo dado transferido, como no
++                    // hardware. O tratador de DMA do GIF do Naruto UN4 le D2_MADR-0x10 para achar a tag
++                    // END que parou a cadeia (marcadores de callback no meio do quadro, ex.: filmes).
++                    uint32_t lastMadr = madr;
+ 
+                     while (tagsProcessed < kMaxChainTags)
+                     {
+@@ -1515,6 +1519,8 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+ 
+                         if (hasPayload)
+                             appendData(dataAddr, tagQwc);
++                        if (id <= 7u)
++                            lastMadr = dataAddr + static_cast<uint32_t>(tagQwc) * 16u;
+                         if (irq && tieEnabled)
+                             endChain = true;
+                         if (endChain)
+@@ -1522,6 +1528,7 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+                     }
+ 
+                     m_ioRegisters[channelBase + 0x30] = tagAddr;
++                    m_ioRegisters[channelBase + 0x10] = lastMadr;
+                     m_ioRegisters[channelBase + 0x40] = asr0;
+                     m_ioRegisters[channelBase + 0x50] = asr1;
+                     chcr = (chcr & ~(0x3u << 4)) | ((asp & 0x3u) << 4);
+@@ -1548,10 +1555,13 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+                             m_pendingVif0Transfers.push_back(std::move(pt));
+                         }
+                     }
+-                    // else if (channelBase == 0x10009000u)
+-                    // {
+-
+-                    // }
++                    else if (channelBase == 0x1000A000u)
++                    {
++                        // UN4Decomp: uma cadeia sem dados (ex.: reinicio que cai direto numa tag END)
++                        // tambem termina o canal e precisa gerar a interrupcao do DMAC.
++                        m_ioRegisters[channelBase + 0x20] = 0u;
++                        completeDmacChannel(channelBase, 2u);
++                    }
+                 }
+                 else if (qwc > 0)
+                 {

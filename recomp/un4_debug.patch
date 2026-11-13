@@ -1,0 +1,205 @@
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index 4b9242c..da85e88 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -345,6 +345,7 @@ public:
+                              uint32_t fallthroughPc,
+                              GuestBranchKind kind,
+                              const char *debugName);
++    std::string un4DispatchTrace(); // UN4Decomp: diagnostico
+     void reportMissingFunction(uint8_t *rdram,
+                                R5900Context *ctx,
+                                uint32_t targetPc,
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index c5e31c4..06b5427 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1,3 +1,4 @@
++#include <iostream>
+ #include "runtime/ee_scheduler.h"
+ 
+ #include "ps2_log.h"
+@@ -246,6 +247,8 @@ void EeScheduler::run()
+                 }
+                 continue;
+             }
++            std::cerr << "[un4] thread " << running->id << " terminou (pc=0) ra=0x" << std::hex << getRegU32(&context, 31)
++                      << " sp=0x" << getRegU32(&context, 29) << std::dec << " trace=" << m_runtime.un4DispatchTrace() << std::endl;
+             makeDormant(*running);
+             m_currentThreadId = 0;
+             copyMainContextToRuntime();
+@@ -513,6 +516,7 @@ int EeScheduler::startThread(int id, uint32_t arg, const R5900Context &caller, b
+     assertExecutor();
+     GuestThread *exiting = currentThread();
+     assert(exiting != nullptr);
++    std::cerr << "[un4] ExitThread thread=" << exiting->id << " delete=" << deleteThreadRecord << " ra=0x" << std::hex << getRegU32(&exiting->activeContext(), 31) << std::dec << std::endl;
+     const int id = exiting->id;
+     const uint32_t ownedStack = deleteThreadRecord && exiting->ownsStack ? exiting->stack : 0u;
+     makeDormant(*exiting);
+@@ -531,6 +535,7 @@ int EeScheduler::startThread(int id, uint32_t arg, const R5900Context &caller, b
+ 
+ int EeScheduler::terminateThread(int id, uint32_t &ownedStack, bool interruptSafe)
+ {
++    std::cerr << "[un4] TerminateThread id=" << id << " (atual=" << m_currentThreadId << ")" << std::endl;
+     assertExecutor();
+     ownedStack = 0;
+     if (id == 0 || id == m_currentThreadId)
+@@ -1889,6 +1894,18 @@ void EeScheduler::processEvent(const EeEvent &event)
+         m_vsyncFlagAddress = 0u;
+         m_vsyncTickAddress = 0u;
+         completeVSync(m_vsyncTick);
++        if (m_vsyncTick <= 5u || (m_vsyncTick % 600u) == 0u)
++        {   // UN4Decomp: diagnostico
++            std::cerr << "[un4] vblank " << m_vsyncTick << " callback=0x" << std::hex << m_gsVSyncCallback << std::dec
++                      << " hasFunction=" << (m_gsVSyncCallback ? m_runtime.hasFunction(m_gsVSyncCallback) : false);
++            if (m_rdram)
++            {
++                uint32_t w588 = 0, w870 = 0; uint8_t b5e4 = 0;
++                std::memcpy(&w588, m_rdram + 0x609588u, 4); std::memcpy(&w870, m_rdram + 0x609870u, 4); b5e4 = m_rdram[0x6095E4u];
++                std::cerr << " D_609588=0x" << std::hex << w588 << " D_6095E4=" << std::dec << int(b5e4) << " D_609870=" << w870;
++            }
++            std::cerr << std::endl;
++        }
+         if (m_gsVSyncCallback != 0u && m_runtime.hasFunction(m_gsVSyncCallback))
+         {
+             GuestInvocation invocation{};
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
+index aed4cb5..7aee137 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
+@@ -1,3 +1,4 @@
++#include <iostream>
+ #include "Common.h"
+ #include "GS.h"
+ #include "ps2_log.h"
+@@ -1297,6 +1298,7 @@ namespace ps2_stubs
+         EeScheduler &ee = runtime->eeScheduler();
+         ee.bindMainContextForSyscall(*ctx, rdram);
+         const uint32_t oldCallback = ee.setGsVSyncCallback(newCallback, gp, sp);
++        std::cerr << "[un4] sceGsSyncVCallback new=0x" << std::hex << newCallback << " old=0x" << oldCallback << " ra=0x" << callerRa << std::dec << std::endl;
+ 
+         static uint32_t s_syncVCallbackLogCount = 0u;
+         if (s_syncVCallbackLogCount < 128u)
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
+index 5110ee2..22068df 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
+@@ -1,3 +1,4 @@
++#include <iostream>
+ #include "Common.h"
+ #include "Thread.h"
+ #include "runtime/ee_scheduler.h"
+@@ -112,6 +113,10 @@ namespace ps2_syscalls
+             const int priority = static_cast<int>(getRegU32(ctx, 5));
+             int oldPriority = 0;
+             const int result = ee.changePriority(id, priority, interruptSafe, oldPriority);
++            {   // UN4Decomp: diagnostico
++                static int s_n = 0;
++                if (s_n < 60) { ++s_n; std::cerr << "[un4] ChangeThreadPriority id=" << id << " prio=" << priority << " (era " << oldPriority << ") ra=0x" << std::hex << getRegU32(ctx, 31) << std::dec << " -> " << result << std::endl; }
++            }
+             setReturnS32(ctx, result);
+             ee.transferIfRequested(interruptSafe);
+         }
+@@ -134,6 +139,10 @@ namespace ps2_syscalls
+         {
+             EeScheduler &ee = scheduler(rdram, ctx, runtime);
+             const int result = ee.wakeupThread(static_cast<int>(getRegU32(ctx, 4)), interruptSafe);
++            {   // UN4Decomp: diagnostico
++                static int s_n = 0;
++                if (s_n < 40) { ++s_n; std::cerr << "[un4] " << (interruptSafe ? "iWakeupThread" : "WakeupThread") << " id=" << static_cast<int>(getRegU32(ctx, 4)) << " ra=0x" << std::hex << getRegU32(ctx, 31) << std::dec << " -> " << result << std::endl; }
++            }
+             setReturnS32(ctx, result);
+             ee.transferIfRequested(interruptSafe);
+         }
+@@ -230,7 +239,9 @@ namespace ps2_syscalls
+             param->initial_priority,
+             param->option,
+         };
+-        setReturnS32(ctx, scheduler(rdram, ctx, runtime).createThread(decoded));
++        const int createdId = scheduler(rdram, ctx, runtime).createThread(decoded);
++        std::cerr << "[un4] CreateThread func=0x" << std::hex << param->func << std::dec << " prio=" << param->initial_priority << " ra=0x" << std::hex << getRegU32(ctx, 31) << std::dec << " -> " << createdId << std::endl;
++        setReturnS32(ctx, createdId);
+     }
+ 
+     void DeleteThread(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+@@ -255,6 +266,7 @@ namespace ps2_syscalls
+         EeScheduler &ee = scheduler(rdram, ctx, runtime);
+         const int id = static_cast<int>(getRegU32(ctx, 4));
+         const uint32_t arg = getRegU32(ctx, 5);
++        std::cerr << "[un4] StartThread id=" << id << " ra=0x" << std::hex << getRegU32(ctx, 31) << std::dec << std::endl;
+         GuestThread *target = ee.thread(id);
+         if (!target)
+         {
+@@ -314,6 +326,7 @@ namespace ps2_syscalls
+     {
+         EeScheduler &ee = scheduler(rdram, ctx, runtime);
+         const int result = ee.suspendThread(static_cast<int>(getRegU32(ctx, 4)), false);
++        std::cerr << "[un4] SuspendThread id=" << static_cast<int>(getRegU32(ctx, 4)) << " -> " << result << std::endl;
+         setReturnS32(ctx, result);
+         ee.transferIfRequested(false);
+     }
+@@ -322,6 +335,7 @@ namespace ps2_syscalls
+     {
+         EeScheduler &ee = scheduler(rdram, ctx, runtime);
+         const int result = ee.resumeThread(static_cast<int>(getRegU32(ctx, 4)), false);
++        std::cerr << "[un4] ResumeThread id=" << static_cast<int>(getRegU32(ctx, 4)) << " -> " << result << std::endl;
+         setReturnS32(ctx, result);
+         ee.transferIfRequested(false);
+     }
+@@ -342,6 +356,8 @@ namespace ps2_syscalls
+         const GuestThread *thread = ee.thread(id);
+         if (!thread)
+         {
++            static int s_m = 0;
++            if (s_m < 20) { ++s_m; std::cerr << "[un4] ReferThreadStatus id=" << id << " -> thread inexistente ra=0x" << std::hex << getRegU32(ctx, 31) << std::dec << std::endl; }
+             setReturnS32(ctx, KE_UNKNOWN_THID);
+             return;
+         }
+@@ -364,6 +380,10 @@ namespace ps2_syscalls
+         status->waitType = rawWaitType(thread->wait.reason);
+         status->waitId = waitId(*thread);
+         status->wakeupCount = thread->wakeupCount;
++        {   // UN4Decomp: diagnostico
++            static int s_n = 0;
++            if (s_n < 60) { ++s_n; std::cerr << "[un4] ReferThreadStatus id=" << id << " status=" << status->status << " ra=0x" << std::hex << getRegU32(ctx, 31) << std::dec << std::endl; }
++        }
+         setReturnS32(ctx, KE_OK);
+     }
+ 
+@@ -375,6 +395,10 @@ namespace ps2_syscalls
+     void SleepThread(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+         EeScheduler &ee = scheduler(rdram, ctx, runtime);
++        {   // UN4Decomp: diagnostico
++            static int s_n = 0;
++            if (s_n < 40) { ++s_n; std::cerr << "[un4] SleepThread thread=" << ee.currentThreadId() << " ra=0x" << std::hex << getRegU32(ctx, 31) << std::dec << std::endl; }
++        }
+         ee.sleepCurrent();
+         setReturnS32(ctx, KE_OK);
+     }
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 45cb9d2..d75e919 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1109,6 +1109,8 @@ bool PS2Runtime::registerFunction(uint32_t address, RecompiledFunction func)
+     return replaceFunction(address, func);
+ }
+ 
++std::string PS2Runtime::un4DispatchTrace() { return formatDispatchHistory(); } // UN4Decomp
++
+ bool PS2Runtime::hasFunction(uint32_t address) const
+ {
+     uint32_t slot = 0u;
+@@ -1350,6 +1352,12 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+                                      GuestBranchKind kind,
+                                      const char *debugName)
+ {
++    if (targetPc == 0u)
++    {   // UN4Decomp: diagnostico - alguma funcao saltou/retornou para o endereco 0
++        static int s_n = 0;
++        if (s_n < 10) { ++s_n; std::cerr << "[un4] salto para 0: origem=0x" << std::hex << sourcePc << " tipo=" << static_cast<int>(kind)
++                                          << " sp=0x" << getRegU32(ctx, 29) << std::dec << " (" << (debugName ? debugName : "") << ") trace=" << formatDispatchHistory() << std::endl; }
++    }
+     ctx->pc = targetPc;
+     const bool isCall = (kind == GuestBranchKind::DirectCall || kind == GuestBranchKind::IndirectCall);
+ 

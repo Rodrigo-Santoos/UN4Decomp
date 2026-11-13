@@ -1,0 +1,24 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index c5e31c4..55b6116 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -423,7 +423,9 @@ void EeScheduler::setupCurrentThread(uint32_t stack, uint32_t stackSize, uint32_
+ int EeScheduler::createThread(const EeThreadCreateParams &params)
+ {
+     assertExecutor();
+-    if (params.priority < 1 || params.priority >= kPriorityCount)
++    // UN4Decomp: o kernel do PS2 aceita prioridade 0 (a mais alta). O UN4 cria suas
++    // threads com a prioridade atual da thread principal, que e 0.
++    if (params.priority < 0 || params.priority >= kPriorityCount)
+     {
+         return KE_ILLEGAL_PRIORITY;
+     }
+@@ -701,7 +703,7 @@ int EeScheduler::cancelWakeup(int id)
+ int EeScheduler::changePriority(int id, int priority, bool interruptSafe, int &oldPriority)
+ {
+     assertExecutor();
+-    if (priority < 1 || priority >= kPriorityCount)
++    if (priority < 0 || priority >= kPriorityCount) // UN4Decomp: 0 e valido no PS2
+     {
+         return KE_ILLEGAL_PRIORITY;
+     }

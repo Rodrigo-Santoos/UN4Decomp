@@ -1,0 +1,107 @@
+diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+--- a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
++++ b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+@@ -935,7 +935,12 @@
+         return s;
+     }
+     bool g_un4DumpRequested = false;
+-    bool g_un4DumpDone = false;
++    // UN4Decomp: o diagnostico de "cores misturadas" ficou desligado: ele copiava 32KB (codigo + dados do VU1) a cada
++    // programa executado, o tempo todo, e isso pesa na luta.
++    bool g_un4DumpDone = true;
++    bool g_un4GarbageDumpDone = false; // UN4Decomp: pacote so com vertices "estourados" (camera/matriz quebrada)
++    const uint8_t *g_un4LastCode = nullptr;
++    uint32_t g_un4LastCodeSize = 0u;
+ 
+     void un4DumpSnap()
+     {
+@@ -996,7 +1001,7 @@
+ }
+ 
+ // UN4Decomp: resume o pacote GIF que o VU1 mandou (quantas tags, PRIM, vertices XYZ) para ver se ele desenha algo
+-static void un4LogXgkickPacket(const uint8_t *data, uint32_t size)
++static bool un4LogXgkickPacket(const uint8_t *data, uint32_t size)
+ {
+     static uint64_t s_n = 0;
+     ++s_n;
+@@ -1004,7 +1009,7 @@
+     const bool un4Print = (s_n <= 80u || ((s_n % 25u) <= 1u && s_lines < 1500u));
+     if (un4Print)
+         ++s_lines;
+-    uint32_t off = 0, tags = 0, xyz = 0, prims = 0, ad = 0, adc = 0, colZero = 0, colNonZero = 0;
++    uint32_t off = 0, tags = 0, xyz = 0, prims = 0, ad = 0, adc = 0, colZero = 0, colNonZero = 0, zMax = 0;
+     std::string fmts, firstVtx;
+     uint64_t lastPrim = ~0ull;
+     while (off + 16u <= size && tags < 64u)
+@@ -1067,6 +1072,8 @@
+                         const bool vadc = ((vhi >> 47) & 1u) != 0u;
+                         if (vadc)
+                             ++adc;
++                        if ((vhi & 0xFFFFFFFFull) == 0x7FFFFFFFull)
++                            ++zMax;
+                         if (firstVtx.size() < 300u)
+                         {
+                             char vb[96];
+@@ -1111,6 +1118,12 @@
+         if (eop)
+             break;
+     }
++    // UN4Decomp (diagnostico): todos os vertices sairam com Z no maximo e sem desenhar (ADC) -> a matriz/camera
++    // que o VU1 recebeu esta quebrada. Quem chamou registra o estado do VU1.
++    const bool un4Garbage = xyz >= 8u && zMax == xyz;
++    if (un4Garbage && !g_un4GarbageDumpDone)
++        std::cerr << "[un4xg] pacote LIXO #" << s_n << " xyz=" << xyz << " adc=" << adc
++                  << " -> registrando o estado do VU1" << std::endl;
+     if (colZero > 0u && colNonZero > 0u && !g_un4DumpDone)
+     {
+         std::cerr << "[un4xg] pacote com cores misturadas #" << s_n << " zero=" << colZero << " cor=" << colNonZero
+@@ -1119,7 +1132,7 @@
+         g_un4DumpDone = true;
+     }
+     if (!un4Print)
+-        return;
++        return un4Garbage;
+     std::cerr << "[un4xg] #" << s_n << " bytes=" << size << " tags=" << tags << " prims=" << prims << " ultimoPrim=0x" << std::hex
+               << lastPrim << std::dec << " xyz=" << xyz << " adc=" << adc << " ad=" << ad << fmts.substr(0, 400) << firstVtx;
+     std::cerr << " qw0-2:";
+@@ -1130,13 +1143,30 @@
+         std::cerr << ' ' << std::hex << v << std::dec;
+     }
+     std::cerr << std::endl;
++    return un4Garbage;
+ }
+ 
+ void VU1Interpreter::finishXgkick()
+ {
+     if (!m_xgkick.active)
+         return;
+-    un4LogXgkickPacket(m_xgkick.packet.data(), m_xgkick.totalBytes);
++    if (un4LogXgkickPacket(m_xgkick.packet.data(), m_xgkick.totalBytes) && !g_un4GarbageDumpDone && m_activeVuData)
++    {
++        // UN4Decomp (diagnostico): estado atual do VU1 (as matrizes de entrada continuam na memoria de dados)
++        g_un4GarbageDumpDone = true;
++        Un4VuSnap &snap = un4Snap();
++        std::memset(snap.code, 0, sizeof(snap.code));
++        if (g_un4LastCode)
++            std::memcpy(snap.code, g_un4LastCode, std::min<uint32_t>(g_un4LastCodeSize, sizeof(snap.code)));
++        std::memcpy(snap.data, m_activeVuData, std::min<uint32_t>(m_activeVuDataSize, sizeof(snap.data)));
++        snap.state = m_state;
++        snap.resume = false;
++        snap.startPC = m_state.pc;
++        snap.top = m_state.top;
++        snap.itop = m_state.itop;
++        snap.valid = true;
++        un4DumpSnap();
++    }
+ 
+     if (m_activeMemory)
+         m_activeMemory->submitGifPacket(GifPathId::Path1, m_xgkick.packet.data(), m_xgkick.totalBytes);
+@@ -1855,6 +1885,8 @@
+     m_activeVuDataSize = dataSize;
+     m_activeGs = &gs;
+     m_activeMemory = memory;
++    g_un4LastCode = vuCode;
++    g_un4LastCodeSize = codeSize;
+ 
+     const int previousRoundingMode = std::fegetround();
+     const bool useVuRounding = std::fesetround(FE_TOWARDZERO) == 0;

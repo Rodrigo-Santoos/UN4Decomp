@@ -1,0 +1,52 @@
+diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
+index 4b9242c..7907943 100644
+--- a/ps2xRuntime/include/ps2_runtime.h
++++ b/ps2xRuntime/include/ps2_runtime.h
+@@ -384,6 +384,8 @@ public:
+     uint32_t guestHeapEnd() const;
+     uint32_t guestHeapLimit() const;
+     uint32_t reserveAsyncCallbackStack(uint32_t size, uint32_t alignment = 16u);
++    // UN4Decomp: as pilhas dos callbacks (VSync, interrupcoes) nao podem invadir a pilha da thread principal.
++    void limitAsyncCallbackStacksBelow(uint32_t address);
+ 
+     void drainCompletedDmacHandlers(uint8_t *rdram);
+ 
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+index 9614016..6864f9c 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+@@ -531,6 +531,13 @@ namespace ps2_syscalls
+         }
+ 
+         scheduler.setupCurrentThread(initialStack, stackSize, getRegU32(ctx, 28));
++        // UN4Decomp: a pilha da thread principal ocupa [sp - stackSize, sp). Os callbacks do runtime
++        // reservavam pilhas descendo a partir do fim da RAM e, a partir do terceiro, sobrescreviam essa
++        // regiao (o enderecos de retorno da main() do UN4 viravam 0 e a thread terminava).
++        if (stackSize != 0u && sp > stackSize)
++        {
++            runtime->limitAsyncCallbackStacksBelow(sp - stackSize);
++        }
+         setReturnU32(ctx, sp);
+     }
+ 
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 45cb9d2..768e444 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1975,6 +1975,16 @@ uint32_t PS2Runtime::guestHeapLimit() const
+     return m_guestHeapConfigured ? m_guestHeapLimit : m_guestHeapSuggestedBase;
+ }
+ 
++void PS2Runtime::limitAsyncCallbackStacksBelow(uint32_t address)
++{
++    std::lock_guard<std::mutex> lock(m_asyncCallbackStackMutex);
++    address &= ~0xFu;
++    if (address > m_asyncCallbackStackFloor && address < m_asyncCallbackStackTop)
++    {
++        m_asyncCallbackStackTop = address;
++    }
++}
++
+ uint32_t PS2Runtime::reserveAsyncCallbackStack(uint32_t size, uint32_t alignment)
+ {
+     if (size == 0u)

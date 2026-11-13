@@ -1,0 +1,176 @@
+--- a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
++++ b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+@@ -1837,6 +1837,63 @@
+     m_stopRequested = true;
+ }
+ 
++// UN4Decomp (diagnostico): grava as entradas de N execucoes do VU1 (codigo, dados e registradores no inicio de
++// cada microprograma) num arquivo, para testar fora do jogo um interpretador mais rapido contra este.
++std::atomic<int> g_un4Vu1CaptureLeft{0};
++void un4Vu1CaptureRequest(int count)
++{
++    g_un4Vu1CaptureLeft.store(count);
++}
++
++namespace
++{
++    void un4Vu1Capture(const uint8_t *code, uint32_t codeSize, const uint8_t *data, uint32_t dataSize, const VU1State &state,
++                       bool resumed, uint32_t startPC, uint32_t top, uint32_t itop)
++    {
++        if (g_un4Vu1CaptureLeft.load(std::memory_order_relaxed) <= 0)
++            return;
++        static std::FILE *file = nullptr;
++        static uint64_t lastCodeHash = 0;
++        static int fileIndex = 0;
++        if (!file)
++        {
++            const char *dir = std::getenv("UN4_GSDUMP_DIR");
++            const std::string path = std::string(dir && *dir ? dir : ".") + "/vu1cap_" + std::to_string(++fileIndex) + ".bin";
++            file = std::fopen(path.c_str(), "wb");
++            if (!file)
++            {
++                g_un4Vu1CaptureLeft.store(0);
++                return;
++            }
++            lastCodeHash = 0;
++            std::cerr << "[un4vu1cap] gravando execucoes do VU1 em " << path << std::endl;
++        }
++        uint64_t hash = 1469598103934665603ull;
++        for (uint32_t i = 0; i < codeSize; i += 8u)
++        {
++            uint64_t w;
++            std::memcpy(&w, code + i, 8);
++            hash = (hash ^ w) * 1099511628211ull;
++        }
++        const uint32_t hasCode = (hash != lastCodeHash) ? 1u : 0u;
++        lastCodeHash = hash;
++        const uint32_t header[8] = {0x43315556u, resumed ? 1u : 0u, startPC, top, itop, codeSize, dataSize, hasCode};
++        const uint32_t stateSize = static_cast<uint32_t>(sizeof(VU1State));
++        std::fwrite(header, 1, sizeof(header), file);
++        std::fwrite(&stateSize, 1, 4, file);
++        std::fwrite(&state, 1, sizeof(VU1State), file);
++        if (hasCode)
++            std::fwrite(code, 1, codeSize, file);
++        std::fwrite(data, 1, dataSize, file);
++        if (g_un4Vu1CaptureLeft.fetch_sub(1) <= 1)
++        {
++            std::fclose(file);
++            file = nullptr;
++            std::cerr << "[un4vu1cap] gravacao terminada" << std::endl;
++        }
++    }
++}
++
+ void VU1Interpreter::execute(uint8_t *vuCode, uint32_t codeSize,
+                              uint8_t *vuData, uint32_t dataSize,
+                              GS &gs, PS2Memory *memory,
+@@ -1860,6 +1917,8 @@
+     m_state.vf[0][3] = 1.0f;
+     if (m_unit == Unit::VU1)
+         un4TakeSnap(vuCode, codeSize, vuData, dataSize, m_state, false, startPC, top, itop);
++    if (m_unit == Unit::VU1)
++        un4Vu1Capture(vuCode, codeSize, vuData, dataSize, m_state, false, startPC, top, itop);
+     run(vuCode, codeSize, vuData, dataSize, gs, memory, maxCycles);
+ }
+ 
+@@ -1874,6 +1933,8 @@
+     m_state.stoppedByT = false;
+     if (m_unit == Unit::VU1)
+         un4TakeSnap(vuCode, codeSize, vuData, dataSize, m_state, true, m_state.pc, top, itop);
++    if (m_unit == Unit::VU1)
++        un4Vu1Capture(vuCode, codeSize, vuData, dataSize, m_state, true, m_state.pc, top, itop);
+     run(vuCode, codeSize, vuData, dataSize, gs, memory, maxCycles);
+ }
+ 
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1,3 +1,8 @@
++#include <filesystem>
++#include <fstream>
++#include <sstream>
++#include <unordered_map>
++#include <unistd.h>
+ #include "un4_profile.h"
+ #include "runtime/gs/un4_gsdump.h"
+ #include <iostream>
+@@ -170,6 +175,53 @@
+ // causada por eles. O jogo usa DIntr/EIntr para proteger o gerenciador de memoria dele; antes as interrupcoes
+ // e as trocas de thread aconteciam no meio dessas partes protegidas e a lista de memoria livre do jogo se
+ // corrompia (a carga travava em 14% com uma thread dando voltas para sempre na lista).
++// UN4Decomp (diagnostico): quanto de CPU cada thread do processo gastou desde o ultimo relatorio.
++static void un4ReportThreadCpu()
++{
++#if defined(__linux__)
++    struct Entry { unsigned long long ticks = 0; std::string name; };
++    static std::unordered_map<int, Entry> s_last;
++    static auto s_lastWall = std::chrono::steady_clock::now();
++    const auto now = std::chrono::steady_clock::now();
++    const double wall = std::chrono::duration<double>(now - s_lastWall).count();
++    s_lastWall = now;
++    std::vector<std::pair<unsigned long long, std::string>> rows;
++    std::error_code ec;
++    for (const auto &dirEntry : std::filesystem::directory_iterator("/proc/self/task", ec))
++    {
++        const int tid = std::atoi(dirEntry.path().filename().c_str());
++        std::ifstream f(dirEntry.path() / "stat");
++        std::string line;
++        if (!std::getline(f, line))
++            continue;
++        const size_t open = line.find('('), close = line.rfind(')');
++        if (open == std::string::npos || close == std::string::npos)
++            continue;
++        const std::string name = line.substr(open + 1, close - open - 1);
++        std::istringstream rest(line.substr(close + 2));
++        std::string tok;
++        unsigned long long utime = 0, stime = 0;
++        for (int field = 3; field <= 15 && (rest >> tok); ++field)
++        {
++            if (field == 14) utime = std::strtoull(tok.c_str(), nullptr, 10);
++            if (field == 15) stime = std::strtoull(tok.c_str(), nullptr, 10);
++        }
++        Entry &e = s_last[tid];
++        const unsigned long long total = utime + stime;
++        const unsigned long long delta = total - e.ticks;
++        e.ticks = total;
++        if (delta)
++            rows.emplace_back(delta, name + "/" + std::to_string(tid));
++    }
++    std::sort(rows.begin(), rows.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
++    const double hz = static_cast<double>(sysconf(_SC_CLK_TCK));
++    std::cerr << "[un4threads] " << wall << "s de relogio; thread do EE=" << static_cast<int>(::gettid()) << "; CPU por thread:";
++    for (size_t i = 0; i < rows.size() && i < 12u; ++i)
++        std::cerr << ' ' << rows[i].second << '=' << static_cast<int>(100.0 * (rows[i].first / hz) / (wall > 0 ? wall : 1)) << '%';
++    std::cerr << std::endl;
++#endif
++}
++
+ static bool un4InterruptsMasked(const GuestThread *thread)
+ {
+     if (!thread)
+@@ -2053,6 +2105,7 @@
+             if (m_vsyncTick == 1200u)
+                 un4prof::dumpAll(m_vsyncTick);
+             un4prof::dump(m_vsyncTick);
++            un4ReportThreadCpu();
+             un4prof::dumpGuest(m_rdram);
+             un4prof::dumpGsCounters();
+             un4prof::cpu::start();
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -8,6 +8,7 @@
+ #include "runtime/gs/gs_frontend.h"
+ #include "runtime/gs/un4_gsdump.h"
+ #include "un4_profile.h"
++void un4Vu1CaptureRequest(int count);
+ #include "runtime/ee_scheduler.h"
+ #include "ThreadNaming.h"
+ #include "Kernel/Stubs/Audio.h"
+@@ -383,6 +384,8 @@
+     {
+         un4gsdump::request(0u);
+         std::cerr << "[un4gsdump] F9 apertado: gravando o proximo quadro" << std::endl;
++        // UN4Decomp (diagnostico): grava as entradas das proximas 5000 execucoes do VU1
++        un4Vu1CaptureRequest(5000);
+         // UN4Decomp (diagnostico): lista todas as funcoes do jogo chamadas desde a ultima marca de 300 vblanks
+         un4prof::dumpAll(0u);
+         // UN4Decomp (diagnostico): o F9 tambem grava a memoria do EE (RAM + scratchpad + memoria do VU1)

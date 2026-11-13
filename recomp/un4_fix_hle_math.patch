@@ -1,0 +1,30 @@
+--- a/ps2xRecomp/src/lib/ps2_recompiler.cpp
++++ b/ps2xRecomp/src/lib/ps2_recompiler.cpp
+@@ -2221,6 +2221,27 @@
+ 
+     bool PS2Recompiler::isStubFunction(const Function &function) const
+     {
++        // UN4Decomp: estas funcoes do jogo sao recompiladas em vez de trocadas pelas versoes em C++ do runtime,
++        // que nao batem com o codigo do jogo (vale tambem quando o config.toml as lista em "stubs"):
++        //  - libvu0 (sceVu0*): sceVu0MulMatrix multiplicava na ordem trocada (m1*m2 em vez de m2*m1),
++        //    InnerProduct/Normalize usavam o w, RotTransPers trocava o modo do z;
++        //  - libm: sin/cos/atan/floor/fabs do UN4 sao as versoes double (argumento em a0, resultado em v0, ponto
++        //    flutuante por software); as do runtime liam f12 e escreviam f0, devolvendo lixo em v0;
++        //  - __kernel_sinf/__kernel_cosf/__ieee754_rem_pio2f (aproximacoes) e rand (sequencia do proprio jogo).
++        static const char *const kUn4Recompiled[] = {"sin", "cos", "atan", "floor", "fabs", "__kernel_sinf",
++                                                     "__kernel_cosf", "__ieee754_rem_pio2f", "rand"};
++        if (function.name.rfind("sceVu0", 0) == 0)
++        {
++            return false;
++        }
++        for (const char *name : kUn4Recompiled)
++        {
++            if (function.name == name)
++            {
++                return false;
++            }
++        }
++
+         if (m_stubFunctionStarts.contains(function.start))
+         {
+             return true;

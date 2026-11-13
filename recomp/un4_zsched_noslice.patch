@@ -1,0 +1,38 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -396,10 +396,32 @@
+     }
+ 
+     const GuestThread *running = currentThread();
+-    if (running != nullptr && hasReadyAtOrAbovePriority(running->currentPriority))
++    // UN4Decomp: o kernel do PS2 nao divide o tempo entre threads de mesma prioridade: uma thread so perde a vez
++    // para outra de prioridade MAIOR (numero menor), ou quando ela mesma espera/chama RotateThreadReadyQueue.
++    // A divisao de tempo daqui deixava duas threads de prioridade 0 do UN4 se intercalarem no meio de codigo que
++    // nao foi feito para isso (malloc / strtod da libc), e a memoria delas se corrompia: ao iniciar a luta a thread
++    // de carga ficava presa para sempre dentro do strtod e a tela nao mostrava mais nada.
++    // PS2X_TIME_SLICE=1 volta ao comportamento antigo.
++    static const bool s_un4TimeSlice = []()
+     {
++        const char *value = std::getenv("PS2X_TIME_SLICE");
++        return value && *value == '1';
++    }();
++    if (s_un4TimeSlice)
++    {
++        if (running != nullptr && hasReadyAtOrAbovePriority(running->currentPriority))
++        {
++            m_rescheduleRequested = true;
++            m_timeSliceExpired = true;
++            return true;
++        }
++    }
++    else if (running != nullptr && running->currentPriority > 0 &&
++             hasReadyAtOrAbovePriority(running->currentPriority - 1))
++    {
++        // uma thread de prioridade maior esta pronta: ela entra, e esta volta para o comeco da fila dela
+         m_rescheduleRequested = true;
+-        m_timeSliceExpired = true;
++        m_timeSliceExpired = false;
+         return true;
+     }
+ 

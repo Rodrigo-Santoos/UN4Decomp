@@ -1,0 +1,229 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/State.h b/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/State.h
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/State.h
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/State.h
+@@ -243,20 +243,24 @@
+ inline std::string g_ps2_cwd_device = "host0";
+ 
+ static constexpr uint32_t kRpcPacketSize = 64;
+-static constexpr uint32_t kRpcPacketPoolBase = 0x01F00000;
++// UN4Decomp: as areas internas do runtime (pacotes/servidores de RPC, TLS, bootmode) ficavam logo acima do heap
++// (0x01F00000-0x01F31000) e por isso o heap do jogo terminava em 0x01F00000, ~1MB antes do PS2 de verdade
++// (la ele vai ate a pilha da thread principal, 0x01FF8000). Agora elas ficam na memoria baixa (0x000C0000-0x000F1000),
++// que no PS2 e do kernel e o jogo nao usa.
++static constexpr uint32_t kRpcPacketPoolBase = 0x000C0000;
+ static constexpr uint32_t kRpcPacketPoolBytes = 0x00010000;
+ static constexpr uint32_t kRpcPacketPoolCount = kRpcPacketPoolBytes / kRpcPacketSize;
+-static constexpr uint32_t kRpcServerPoolBase = 0x01F10000;
++static constexpr uint32_t kRpcServerPoolBase = 0x000D0000;
+ static constexpr uint32_t kRpcServerPoolBytes = 0x00010000;
+ static constexpr uint32_t kRpcServerStride = 0x80;
+ static constexpr uint32_t kRpcServerPoolCount = kRpcServerPoolBytes / kRpcServerStride;
+ 
+-static constexpr uint32_t kTlsPoolBase = 0x01F20000;
++static constexpr uint32_t kTlsPoolBase = 0x000E0000;
+ static constexpr uint32_t kTlsPoolBytes = 0x00010000;
+ static constexpr uint32_t kTlsBlockSize = 0x100;
+ static constexpr uint32_t kTlsPoolCount = kTlsPoolBytes / kTlsBlockSize;
+ 
+-static constexpr uint32_t kBootModePoolBase = 0x01F30000;
++static constexpr uint32_t kBootModePoolBase = 0x000F0000;
+ static constexpr uint32_t kBootModePoolBytes = 0x00001000;
+ 
+ static constexpr uint32_t kSifRpcModeNowait = 0x01;
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+@@ -1,6 +1,17 @@
+ #include "Common.h"
+ #include "System.h"
+ 
++
++namespace
++{
++    // UN4Decomp: comeco (endereco mais baixo) da pilha da thread principal, anotado no SetupThread
++    uint32_t &un4MainStackBottom()
++    {
++        static uint32_t s_bottom = 0u;
++        return s_bottom;
++    }
++}
++
+ namespace ps2_syscalls
+ {
+     void GsSetCrt(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+@@ -489,7 +500,18 @@
+         const uint32_t stackSize = stackSizeSigned > 0
+                                        ? static_cast<uint32_t>(stackSizeSigned)
+                                        : 0u;
+-        if (stack == 0xFFFFFFFFu)
++        // UN4Decomp: como no kernel do PS2, stack = -1 coloca a pilha no FIM da RAM: ela ocupa
++        // [RAM - tamanho, RAM) e o sp comeca perto do topo. Antes o sp comecava em RAM - tamanho, a pilha ficava
++        // em [RAM - 2*tamanho, RAM - tamanho) e o heap do jogo terminava 32KB antes do PS2. O UN4 calcula a
++        // memoria que pega com malloc contando com o heap ate RAM - 0x8000 e sobrava 0 byte para o resto
++        // (strtod, buffers): a carga travava.
++        uint32_t un4StackBottom = 0u;
++        if (stack == 0xFFFFFFFFu && stackSizeSigned > 0 && static_cast<uint32_t>(stackSizeSigned) < PS2_RAM_SIZE)
++        {
++            un4StackBottom = PS2_RAM_SIZE - static_cast<uint32_t>(stackSizeSigned);
++            sp = PS2_RAM_SIZE - 0x2A0u;
++        }
++        else if (stack == 0xFFFFFFFFu)
+         {
+             if (stackSizeSigned > 0)
+             {
+@@ -521,7 +543,11 @@
+         }
+ 
+         sp &= ~0xFu;
+-        if (stack == 0xFFFFFFFFu)
++        if (un4StackBottom != 0u)
++        {
++            initialStack = un4StackBottom;
++        }
++        else if (stack == 0xFFFFFFFFu)
+         {
+             initialStack = sp;
+         }
+@@ -534,9 +560,15 @@
+         // UN4Decomp: a pilha da thread principal ocupa [sp - stackSize, sp). Os callbacks do runtime
+         // reservavam pilhas descendo a partir do fim da RAM e, a partir do terceiro, sobrescreviam essa
+         // regiao (o enderecos de retorno da main() do UN4 viravam 0 e a thread terminava).
+-        if (stackSize != 0u && sp > stackSize)
++        if (un4StackBottom != 0u)
++        {
++            runtime->limitAsyncCallbackStacksBelow(un4StackBottom);
++            un4MainStackBottom() = un4StackBottom;
++        }
++        else if (stackSize != 0u && sp > stackSize)
+         {
+             runtime->limitAsyncCallbackStacksBelow(sp - stackSize);
++            un4MainStackBottom() = sp - stackSize;
+         }
+         setReturnU32(ctx, sp);
+     }
+@@ -544,6 +576,22 @@
+     // 0x3D SetupHeap: returns heap base/start pointer
+     void SetupHeap(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
++        // UN4Decomp: como no PS2, tamanho -1 = o heap vai ate o comeco da pilha da thread principal
++        if (getRegU32(ctx, 5) == 0xFFFFFFFFu && un4MainStackBottom() > getRegU32(ctx, 4) + 0x10000u)
++        {
++            const uint32_t un4Base = (getRegU32(ctx, 4) + 0xFu) & ~0xFu;
++            const uint32_t un4Limit = un4MainStackBottom() & ~0xFu;
++            if (runtime)
++            {
++                runtime->configureGuestHeap(un4Base, un4Limit);
++                std::cerr << "[un4heap] SetupHeap base=0x" << std::hex << runtime->guestHeapBase()
++                          << " fim=0x" << runtime->guestHeapLimit() << std::dec << " ("
++                          << ((runtime->guestHeapLimit() - runtime->guestHeapBase()) >> 10) << " KB)" << std::endl;
++                setReturnU32(ctx, runtime->guestHeapBase());
++                return;
++            }
++        }
++
+         const uint32_t heapBaseRaw = getRegU32(ctx, 4); // $a0
+         const uint32_t heapSize = getRegU32(ctx, 5);    // $a1 (optional size)
+ 
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1651,7 +1651,12 @@
+ 
+ uint32_t PS2Runtime::clampGuestHeapLimit(uint32_t guestLimit) const
+ {
+-    const uint32_t hardLimit = std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
++    // UN4Decomp: o SetupHeap pode levar o heap ate a pilha da thread principal (como no PS2); 0 = padrao antigo
++    if (guestLimit == 0u)
++    {
++        return std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
++    }
++    const uint32_t hardLimit = PS2_RAM_SIZE;
+     if (guestLimit == 0u || guestLimit > hardLimit)
+     {
+         return hardLimit;
+@@ -1786,9 +1791,54 @@
+                                  replacement.end());
+ 
+         m_guestHeapEnd = std::max(m_guestHeapEnd, static_cast<uint32_t>(allocEnd));
++        if (allocSize >= 0x40000u)
++        {
++            uint64_t freeTotal = 0u;
++            for (const GuestHeapBlock &b : m_guestHeapBlocks)
++                if (b.free)
++                    freeTotal += b.size;
++            std::cerr << "[un4heap] malloc grande tam=0x" << std::hex << allocSize << " -> 0x" << alignedAddr
++                      << std::dec << " (livre depois: " << (freeTotal >> 10) << " KB)" << std::endl;
++        }
+         return alignedAddr;
+     }
+ 
++    // UN4Decomp (diagnostico): heap sem espaco
++    {
++        static uint32_t s_failures = 0u;
++        ++s_failures;
++        if (s_failures <= 20u || (s_failures % 1000u) == 0u)
++        {
++            uint64_t freeTotal = 0u, largest = 0u, usedTotal = 0u;
++            for (const GuestHeapBlock &b : m_guestHeapBlocks)
++            {
++                if (b.free)
++                {
++                    freeTotal += b.size;
++                    largest = std::max<uint64_t>(largest, b.size);
++                }
++                else
++                    usedTotal += b.size;
++            }
++            std::cerr << "[un4heap] FALHOU malloc #" << s_failures << " tam=0x" << std::hex << allocSize
++                      << " heap=[0x" << m_guestHeapBase << ",0x" << m_guestHeapLimit << ")" << std::dec
++                      << " usado=" << (usedTotal >> 10) << "KB livre=" << (freeTotal >> 10) << "KB maior_livre="
++                      << (largest >> 10) << "KB blocos=" << m_guestHeapBlocks.size() << std::endl;
++            if (s_failures == 1u)
++            {
++                std::vector<GuestHeapBlock> used;
++                for (const GuestHeapBlock &b : m_guestHeapBlocks)
++                    if (!b.free)
++                        used.push_back(b);
++                std::sort(used.begin(), used.end(), [](const GuestHeapBlock &a, const GuestHeapBlock &b)
++                          { return a.size > b.size; });
++                std::cerr << "[un4heap]   maiores blocos usados:";
++                for (size_t i = 0; i < used.size() && i < 16u; ++i)
++                    std::cerr << " 0x" << std::hex << used[i].addr << "+0x" << used[i].size << std::dec;
++                std::cerr << std::endl;
++            }
++        }
++    }
+     return 0u;
+ }
+ 
+@@ -2015,6 +2065,30 @@
+         return 0u;
+     }
+ 
++    // UN4Decomp: as pilhas de callback/interrupcao ficam na memoria baixa (0x00020000-0x000C0000, area do
++    // kernel no PS2, onde o kernel de verdade tambem guarda a pilha das interrupcoes). Antes elas ocupavam o fim
++    // da RAM e o heap do jogo tinha que terminar ~1MB antes do PS2. Se acabar, usa um bloco do heap.
++    {
++        constexpr uint32_t kUn4LowStackFloor = 0x00020000u;
++        constexpr uint32_t kUn4LowStackTop = 0x000C0000u;
++        static uint32_t s_un4LowTop = kUn4LowStackTop;
++        const uint32_t want = (size + 0xFu) & ~0xFu;
++        {
++            std::lock_guard<std::mutex> lock(m_asyncCallbackStackMutex);
++            if (s_un4LowTop >= kUn4LowStackFloor + want)
++            {
++                const uint32_t top = s_un4LowTop;
++                s_un4LowTop -= want;
++                return top - 0x10u;
++            }
++        }
++        const uint32_t block = guestMalloc(want, 16u);
++        if (block != 0u)
++        {
++            return block + want - 0x10u;
++        }
++    }
++
+     const uint32_t normalizedAlignment = normalizeGuestHeapAlignment(alignment);
+     const uint32_t allocSize = alignGuestHeapValue(size, kGuestHeapDefaultAlignment);
+     if (allocSize == 0u)

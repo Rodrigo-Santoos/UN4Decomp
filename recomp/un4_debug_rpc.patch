@@ -1,0 +1,50 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
+index 07fcd29..23b4e83 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
+@@ -1,3 +1,5 @@
++#include <unordered_map>
++#include <iostream>
+ #include "Common.h"
+ #include "RPC.h"
+ #include "../../ps2_iop_transport.h"
+@@ -18,6 +20,30 @@ namespace ps2_syscalls
+ 
+         void pushSifRpcDebugEventLocked(SifRpcDebugEvent event)
+         {
++            // UN4Decomp: diagnostico de RPC (cada tipo: 3 primeiras vezes, depois 100, 1000, 10000...)
++            {
++                static std::unordered_map<uint64_t, uint64_t> s_un4Counts;
++                uint64_t key = reinterpret_cast<uintptr_t>(event.op);
++                key = key * 1099511628211ull ^ event.sid;
++                key = key * 1099511628211ull ^ event.rpcNum;
++                key = key * 1099511628211ull ^ event.flags;
++                key = key * 1099511628211ull ^ static_cast<uint32_t>(event.result);
++                const uint64_t n = ++s_un4Counts[key];
++                bool show = n <= 3u;
++                for (uint64_t m = 100u; m <= 100000000u && !show; m *= 10u)
++                {
++                    show = (n == m);
++                }
++                if (show)
++                {
++                    std::cerr << "[un4rpc] " << (event.op ? event.op : "?") << " #" << n
++                              << " sid=0x" << std::hex << event.sid << " rpc=0x" << event.rpcNum
++                              << " flags=0x" << event.flags << " server=0x" << event.serverPtr
++                              << " send=" << std::dec << event.sendSize << " recv=" << event.recvSize
++                              << " mode=0x" << std::hex << event.mode << " ra=0x" << event.ra
++                              << " thread=" << std::dec << event.threadId << " result=" << event.result << std::endl;
++                }
++            }
+             event.seq = ++g_sif_rpc_debug_next_seq;
+             g_sif_rpc_debug_history[event.seq % kSifRpcDebugHistoryCount] = event;
+         }
+@@ -216,6 +242,8 @@ namespace ps2_syscalls
+         const auto loaded = runtime->loadIopModule(modulePath, arguments.empty() ? nullptr : arguments.data(), static_cast<uint32_t>(arguments.size()));
+         if (!loaded.handled || loaded.moduleId <= 0)
+         {
++            std::cerr << "[un4rpc] FALHOU ao carregar modulo IOP: " << modulePath << " handled=" << loaded.handled
++                      << " id=" << loaded.moduleId << std::endl;
+             setReturnS32(ctx, -1);
+             return;
+         }

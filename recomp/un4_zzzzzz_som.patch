@@ -1,0 +1,255 @@
+--- a/ps2xIOP/src/emulator/core/iop_cpu.cpp
++++ b/ps2xIOP/src/emulator/core/iop_cpu.cpp
+@@ -356,7 +356,11 @@
+         {
+             const uint32_t address = cpu.gpr[rs] + static_cast<uint32_t>(simm);
+             const uint32_t memory = m_memory.read32(address & ~3u);
+-            const uint32_t old = cpu.gpr[rt];
++            // UN4Decomp: LWL/LWR vem em par (leitura desalinhada). O segundo precisa juntar com o valor que o
++            // primeiro acabou de ler, que ainda esta "em transito" por causa do atraso de leitura do R3000.
++            // Usando o registrador antigo, toda leitura desalinhada de 32 bits no IOP saia com lixo na metade
++            // de cima (era isso que estragava o som da CRI ADX: saia um chiado saturado).
++            const uint32_t old = (cpu.pendingLoad && cpu.pendingLoadReg == rt) ? cpu.pendingLoadValue : cpu.gpr[rt];
+             static constexpr uint32_t masks[4] = {0x00FFFFFFu, 0x0000FFFFu, 0x000000FFu, 0x00000000u};
+             static constexpr uint32_t shifts[4] = {24u, 16u, 8u, 0u};
+             load(rt, (old & masks[address & 3u]) | (memory << shifts[address & 3u]));
+@@ -377,7 +381,11 @@
+         {
+             const uint32_t address = cpu.gpr[rs] + static_cast<uint32_t>(simm);
+             const uint32_t memory = m_memory.read32(address & ~3u);
+-            const uint32_t old = cpu.gpr[rt];
++            // UN4Decomp: LWL/LWR vem em par (leitura desalinhada). O segundo precisa juntar com o valor que o
++            // primeiro acabou de ler, que ainda esta "em transito" por causa do atraso de leitura do R3000.
++            // Usando o registrador antigo, toda leitura desalinhada de 32 bits no IOP saia com lixo na metade
++            // de cima (era isso que estragava o som da CRI ADX: saia um chiado saturado).
++            const uint32_t old = (cpu.pendingLoad && cpu.pendingLoadReg == rt) ? cpu.pendingLoadValue : cpu.gpr[rt];
+             static constexpr uint32_t masks[4] = {0x00000000u, 0xFF000000u, 0xFFFF0000u, 0xFFFFFF00u};
+             static constexpr uint32_t shifts[4] = {0u, 8u, 16u, 24u};
+             load(rt, (old & masks[address & 3u]) | (memory >> shifts[address & 3u]));
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -27,6 +27,85 @@
+ #include <sstream>
+ #include <utility>
+ 
++// UN4Decomp: saida de som. A CRI ADX (musica e vozes) roda no IOP e entrega o som ja decodificado ao SPU2 por
++// sceSdBlockTrans: um buffer circular de PCM 16 bits, 48 kHz, em blocos de 512 bytes (256 amostras) do canal
++// esquerdo seguidos de 512 bytes do direito. Cada vez que o "SPU2" termina de tocar uma metade do buffer, ela e
++// copiada para esta fila, e o runtime (thread de audio do PC) puxa daqui com un4AudioPull.
++#include <deque>
++#include <mutex>
++namespace
++{
++    std::mutex g_un4AudioMutex;
++    std::deque<int16_t> g_un4AudioFifo; // amostras intercaladas E,D
++    bool g_un4AudioPrimed = false;
++    constexpr size_t kUn4AudioMaxSamples = 14400u * 2u; // 0,3 segundo (acima disso descarta o mais antigo)
++    constexpr size_t kUn4AudioPrimeSamples = 3072u * 2u; // ~64 ms guardados antes de comecar a tocar
++
++    void un4AudioPush(const int16_t *interleaved, size_t frames)
++    {
++        std::lock_guard<std::mutex> lock(g_un4AudioMutex);
++        g_un4AudioFifo.insert(g_un4AudioFifo.end(), interleaved, interleaved + frames * 2u);
++        while (g_un4AudioFifo.size() > kUn4AudioMaxSamples)
++            g_un4AudioFifo.pop_front();
++    }
++}
++
++// Preenche 'out' com 'frames' quadros estereo (silencio quando falta som). Chamada pela thread de audio.
++// O jogo nem sempre roda a 60 quadros por segundo exatos (no menu fica em ~57), entao o som chega um pouco mais
++// devagar do que a placa consome. Em vez de deixar buracos (estalos), a leitura acompanha o ritmo de chegada:
++// quanto mais vazia a fila, mais devagar ela e lida (interpolando), ate o limite de 60% da velocidade.
++void un4AudioPull(int16_t *out, size_t frames)
++{
++    std::lock_guard<std::mutex> lock(g_un4AudioMutex);
++    static double pos = 0.0;    // posicao fracionaria dentro da fila (em quadros)
++    static double ratio = 1.0;  // quadros da fila consumidos por quadro tocado
++    constexpr double kTargetFrames = 2400.0; // ~50 ms guardados
++    size_t available = g_un4AudioFifo.size() / 2u;
++    if (!g_un4AudioPrimed && available >= kUn4AudioPrimeSamples / 2u)
++    {
++        g_un4AudioPrimed = true;
++        pos = 0.0;
++    }
++    size_t done = 0;
++    if (g_un4AudioPrimed)
++    {
++        double wantedRatio = static_cast<double>(available) / kTargetFrames;
++        wantedRatio = std::min(1.03, std::max(0.6, wantedRatio));
++        ratio = ratio * 0.9 + wantedRatio * 0.1;
++        for (; done < frames; ++done)
++        {
++            const size_t idx = static_cast<size_t>(pos);
++            if (idx + 1u >= available)
++                break;
++            const double frac = pos - static_cast<double>(idx);
++            for (size_t c = 0; c < 2u; ++c)
++            {
++                const double a = g_un4AudioFifo[idx * 2u + c];
++                const double b = g_un4AudioFifo[(idx + 1u) * 2u + c];
++                out[done * 2u + c] = static_cast<int16_t>(a + (b - a) * frac);
++            }
++            pos += ratio;
++        }
++        const size_t consumed = std::min(static_cast<size_t>(pos), available);
++        g_un4AudioFifo.erase(g_un4AudioFifo.begin(), g_un4AudioFifo.begin() + static_cast<std::ptrdiff_t>(consumed * 2u));
++        pos -= static_cast<double>(consumed);
++        if (done < frames)
++        {
++            g_un4AudioPrimed = false; // acabou o som: junta um pouco de novo antes de voltar a tocar
++            // termina em rampa para nao estalar
++            const size_t ramp = std::min<size_t>(done, 64u);
++            for (size_t k = 0; k < ramp; ++k)
++            {
++                const double g = static_cast<double>(ramp - 1u - k) / static_cast<double>(ramp);
++                out[(done - ramp + k) * 2u] = static_cast<int16_t>(out[(done - ramp + k) * 2u] * g);
++                out[(done - ramp + k) * 2u + 1u] = static_cast<int16_t>(out[(done - ramp + k) * 2u + 1u] * g);
++            }
++        }
++    }
++    for (size_t k = done * 2u; k < frames * 2u; ++k)
++        out[k] = 0;
++}
++
+ namespace ps2x::iop::detail
+ {
+     namespace
+@@ -896,6 +975,65 @@
+                             block.nextCycle = totalCycles + step;
+                         if (block.half == 1u && !block.loop)
+                             block.active = false;
++                        {
++                            // UN4Decomp: a metade que acabou de "tocar" vai para a saida de som do PC
++                            const uint32_t halfBytes = block.size / 2u;
++                            const uint32_t start = block.address + block.half * halfBytes;
++                            static std::vector<int16_t> pcm;
++                            pcm.clear();
++                            for (uint32_t off = 0; off + 1024u <= halfBytes; off += 1024u)
++                            {
++                                for (uint32_t k = 0; k < 256u; ++k)
++                                {
++                                    const uint32_t l = start + off + k * 2u;
++                                    const uint32_t r = l + 512u;
++                                    pcm.push_back(static_cast<int16_t>(memory.read8(l) | (memory.read8(l + 1u) << 8)));
++                                    pcm.push_back(static_cast<int16_t>(memory.read8(r) | (memory.read8(r + 1u) << 8)));
++                                }
++                            }
++                            // UN4_SOM=0 desliga o som
++                            static const bool s_on = []() { const char *e = std::getenv("UN4_SOM"); return !e || e[0] != '0'; }();
++                            if (!pcm.empty() && s_on)
++                                un4AudioPush(pcm.data(), pcm.size() / 2u);
++                            {
++                                // diagnostico: grava os bytes crus das metades (ate 6 MB, pulando silencio total)
++                                static std::FILE *raw = nullptr;
++                                static size_t rawBytes = 0;
++                                static bool rawDone = false;
++                                if (!rawDone)
++                                {
++                                    std::vector<uint8_t> bytes(halfBytes);
++                                    bool any = false;
++                                    for (uint32_t k = 0; k < halfBytes; ++k)
++                                    {
++                                        bytes[k] = memory.read8(start + k);
++                                        any = any || bytes[k] != 0u;
++                                    }
++                                    if (any)
++                                    {
++                                        if (!raw)
++                                        {
++                                            const char *dir = std::getenv("UN4_GSDUMP_DIR");
++                                            raw = std::fopen((std::string(dir && *dir ? dir : ".") + "/sdraw.bin").c_str(), "wb");
++                                        }
++                                        if (raw)
++                                        {
++                                            const uint32_t hdr[4] = {0x57415253u, ch, block.half, halfBytes};
++                                            std::fwrite(hdr, 1, sizeof(hdr), raw);
++                                            std::fwrite(bytes.data(), 1, bytes.size(), raw);
++                                            std::fflush(raw);
++                                            rawBytes += bytes.size();
++                                        }
++                                        if (!raw || rawBytes > (6u << 20))
++                                        {
++                                            rawDone = true;
++                                            if (raw)
++                                                std::fclose(raw);
++                                        }
++                                    }
++                                }
++                            }
++                        }
+                         block.half ^= 1u;
+                         const Un4SdHandler handler = un4SdTransHandlers[ch];
+                         if (handler.function != 0u)
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -9,6 +9,7 @@
+ #include "runtime/gs/un4_gsdump.h"
+ #include "un4_profile.h"
+ void un4Vu1CaptureRequest(int count);
++void un4AudioPull(int16_t *out, size_t frames);
+ #include "runtime/ee_scheduler.h"
+ #include "ThreadNaming.h"
+ #include "Kernel/Stubs/Audio.h"
+@@ -767,6 +768,17 @@
+         InitWindow(HOST_WINDOW_WIDTH, HOST_WINDOW_HEIGHT, title);
+         InitAudioDevice();
+         m_audioBackend.setAudioReady(IsAudioDeviceReady());
++        if (IsAudioDeviceReady())
++        {
++            // UN4Decomp: saida de som (musica e vozes da CRI ADX): 48 kHz, 16 bits, estereo
++            SetAudioStreamBufferSizeDefault(1024);
++            static AudioStream un4Stream = LoadAudioStream(48000, 16, 2);
++            SetAudioStreamCallback(un4Stream, [](void *buffer, unsigned int frames)
++                                   { un4AudioPull(static_cast<int16_t *>(buffer), frames); });
++            SetAudioStreamVolume(un4Stream, 0.6f);
++            PlayAudioStream(un4Stream);
++            std::cerr << "[un4som] saida de som ligada (48 kHz estereo)" << std::endl;
++        }
+ #endif
+         SetTargetFPS(60);
+         if (m_debugUiInitCallback)
+--- a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
++++ b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+@@ -61,6 +61,24 @@
+     return 0u;
+ }
+ 
++namespace
++{
++    // UN4Decomp: "m_xgkick = {}" zerava os 64 KB do buffer do pacote a cada microprograma e a cada XGKICK
++    // (centenas de MB de memset por quadro na luta). Basta zerar os campos de controle.
++    template <typename X>
++    inline void un4ResetXgkick(X &x)
++    {
++        x.sourceAddress = 0;
++        x.totalBytes = 0;
++        x.copiedBytes = 0;
++        x.currentTagEnd = 0;
++        x.cycleCredit = 0;
++        x.issueCycle = 0;
++        x.active = false;
++        x.currentTagEop = false;
++    }
++}
++
+ VU1Interpreter::VU1Interpreter(Unit unit)
+     : m_unit(unit)
+ {
+@@ -76,7 +94,7 @@
+     m_vfWritePipeline = {};
+     m_viWritePipeline = {};
+     m_accWritePipeline = {};
+-    m_xgkick = {};
++    un4ResetXgkick(m_xgkick);
+     m_vfReady = {};
+     m_viReady = {};
+     m_accReady = {};
+@@ -1185,7 +1203,7 @@
+         static uint64_t s_n = 0;
+         if ((++s_n % 500u) == 1u) std::cerr << "[un4] VU1 XGKICK #" << s_n << " addr=0x" << std::hex << qwordAddress << std::dec << std::endl;
+     }
+-    m_xgkick = {};
++    un4ResetXgkick(m_xgkick);
+     m_xgkick.active = true;
+     m_xgkick.sourceAddress = sourceAddress;
+     m_xgkick.cycleCredit = 1u; // XGKICK's issue cycle counts toward PATH1.

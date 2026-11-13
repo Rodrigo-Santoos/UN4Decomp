@@ -1,0 +1,258 @@
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -18,6 +18,8 @@
+ #include "iop_emulator_const.h"
+ 
+ #include <algorithm>
++#include <array>
++#include <cstdint>
+ #include <cctype>
+ #include <map>
+ #include <optional>
+@@ -139,6 +141,10 @@
+             secrMcCommandHandler = {};
+             secrMcDevIdHandler = {};
+             checkKelfPathCallback = {};
++            un4SdBlocks = {};
++            un4SdTransHandlers = {};
++            un4SdSpu2Handler = {};
++            un4ServicingSd = false;
+         }
+ 
+         uint8_t read8(uint32_t address) const
+@@ -341,6 +347,8 @@
+             }
+             if (iequals(call.library, "heaplib") && heaplib.dispatchImport(call.ordinal, cpu))
+                 return ImportDisposition::Handled;
++            if (iequals(call.library, "libsd") && un4DispatchLibsd(call.ordinal, cpu))
++                return ImportDisposition::Handled;
+ 
+             const uint32_t target = imports.resolve(call.library, call.ordinal, call.version);
+             if (target != 0u)
+@@ -410,6 +418,8 @@
+                     servicePendingDmaInterrupts();
+                 if (!servicingGuestCallbacks && !pendingGuestCallbacks.empty())
+                     servicePendingGuestCallbacks();
++                if (!un4ServicingSd && un4SdNextCycle(UINT64_MAX) <= totalCycles)
++                    un4ServiceSd();
+             }
+             activeCpu = previous;
+             return static_cast<uint32_t>(totalInstructions - start);
+@@ -563,6 +573,7 @@
+                     servicePendingDmaInterrupts();
+                     servicePendingGuestCallbacks();
+                     timrman.serviceDue(totalCycles, *this);
++                    un4ServiceSd();
+                     IopThread *next = kernel.beginNextReady(totalCycles);
+                     if (!next)
+                     {
+@@ -572,6 +583,7 @@
+                         if (!pendingGuestCallbacks.empty())
+                             nextWake = std::min(nextWake, pendingGuestCallbacks.begin()->first);
+                         nextWake = timrman.nextEventCycle(nextWake);
++                        nextWake = un4SdNextCycle(nextWake);
+                         totalCycles = std::max(totalCycles + 1u, std::min(target, nextWake));
+                         continue;
+                     }
+@@ -710,6 +722,200 @@
+         GuestCallback secrMcCommandHandler;
+         GuestCallback secrMcDevIdHandler;
+         GuestCallback checkKelfPathCallback;
++
++        // UN4Decomp: libsd (SPU2) simulado so no tempo. O CRI_ADXI.IRX toca ADX mandando PCM para o SPU2 com
++        // sceSdBlockTrans em laco (AutoDMA) e so decodifica o proximo pedaco quando a interrupcao de "metade do
++        // buffer tocada" chega. Sem ela o ADX nunca andava e o jogo esperava para sempre o fim das vozes/efeitos
++        // (a luta parava antes de comecar). Aqui o buffer "toca" a 48kHz estereo 16 bits e a interrupcao e
++        // chamada a cada metade. Ainda nao sai som.
++        struct Un4SdBlock
++        {
++            bool active = false;
++            bool loop = false;
++            uint32_t address = 0u;
++            uint32_t size = 0u;
++            uint32_t half = 0u;
++            uint64_t nextCycle = 0u;
++        };
++        struct Un4SdHandler
++        {
++            uint32_t function = 0u;
++            uint32_t argument = 0u;
++            uint32_t gp = 0u;
++        };
++        std::array<Un4SdBlock, 2> un4SdBlocks{};
++        std::array<Un4SdHandler, 2> un4SdTransHandlers{};
++        Un4SdHandler un4SdSpu2Handler{};
++        bool un4ServicingSd = false;
++        uint32_t un4SdLogCount = 0u;
++        uint64_t un4SdInterrupts = 0u;
++
++        static uint64_t un4SdHalfCycles(uint32_t size)
++        {
++            // 48000 quadros/s * 4 bytes (16 bits estereo) = 192000 bytes/s; relogio do IOP 36,864MHz -> 192 ciclos/byte
++            const uint64_t half = std::max<uint32_t>(size / 2u, 64u);
++            return half * (kIopClockHz / 192000ull);
++        }
++
++        bool un4DispatchLibsd(uint16_t ordinal, CpuState &cpu)
++        {
++            const uint32_t a0 = cpu.gpr[4];
++            const uint32_t a1 = cpu.gpr[5];
++            const uint32_t a2 = cpu.gpr[6];
++            const uint32_t a3 = cpu.gpr[7];
++            auto setV0 = [&](uint32_t value) { cpu.gpr[2] = value; };
++            switch (ordinal)
++            {
++            case 2:  // sceSdQuit
++            case 4:  // sceSdInit
++                un4SdBlocks = {};
++                setV0(0u);
++                return true;
++            case 5:  // sceSdSetParam
++            case 7:  // sceSdSetSwitch
++            case 9:  // sceSdSetAddr
++            case 11: // sceSdSetCoreAttr
++            case 23: // sceSdSetEffectAttr
++            case 25: // sceSdClearEffectWorkArea
++            case 31: // sceSdCleanEffectWorkArea
++            case 32: // sceSdSetEffectMode
++            case 33: // sceSdSetEffectModeParams
++                setV0(0u);
++                return true;
++            case 6:  // sceSdGetParam
++            case 8:  // sceSdGetSwitch
++            case 10: // sceSdGetAddr
++            case 12: // sceSdGetCoreAttr
++            case 24: // sceSdGetEffectAttr
++                setV0(0u);
++                return true;
++            case 17: // sceSdVoiceTrans(ch, mode, iopAddr, spuAddr, size): transferencia instantanea
++                setV0(memory.read32(cpu.gpr[29] + 16u)); // 5o argumento fica na pilha (ABI o32 do IOP)
++                return true;
++            case 19: // sceSdVoiceTransStatus(ch, flag): ja terminou
++                setV0(1u);
++                return true;
++            case 18: // sceSdBlockTrans(ch, mode, iopAddr, size, ...)
++            {
++                Un4SdBlock &block = un4SdBlocks[a0 & 1u];
++                const uint32_t op = a1 & 3u;
++                if (op == 2u) // SD_TRANS_MODE_STOP
++                {
++                    block.active = false;
++                    setV0(0u);
++                    return true;
++                }
++                if (op == 1u) // leitura (gravacao do SPU2): nao usado
++                {
++                    setV0(0u);
++                    return true;
++                }
++                block.active = a3 != 0u;
++                block.loop = (a1 & 0x10u) != 0u;
++                block.address = a2;
++                block.size = a3;
++                block.half = 0u;
++                block.nextCycle = totalCycles + un4SdHalfCycles(a3);
++                if (un4SdLogCount++ < 8u)
++                {
++                    std::ostringstream out;
++                    out << "[un4sd] BlockTrans ch=" << (a0 & 1u) << " modo=0x" << std::hex << a1 << " endereco=0x" << a2
++                        << " tamanho=0x" << a3 << " handler=0x" << un4SdTransHandlers[a0 & 1u].function;
++                    log(LogLevel::Info, out.str());
++                }
++                setV0(0u);
++                return true;
++            }
++            case 20: // sceSdBlockTransStatus(ch, flag): (metade atual << 24) | endereco atual
++            {
++                const Un4SdBlock &block = un4SdBlocks[a0 & 1u];
++                if (!block.active)
++                {
++                    setV0(0u);
++                    return true;
++                }
++                const uint32_t current = block.address + block.half * (block.size / 2u);
++                setV0((block.half << 24) | (current & 0x00FFFFFFu));
++                return true;
++            }
++            case 21: // sceSdSetTransCallback
++            case 22: // sceSdSetIRQCallback
++            case 30: // sceSdStopTrans
++                setV0(0u);
++                return true;
++            case 26: // sceSdSetTransIntrHandler(ch, func, arg) -> handler antigo
++            {
++                Un4SdHandler &handler = un4SdTransHandlers[a0 & 1u];
++                const uint32_t old = handler.function;
++                handler = {a1, a2, cpu.gpr[28]};
++                setV0(old);
++                return true;
++            }
++            case 27: // sceSdSetSpu2IntrHandler(func, arg)
++            {
++                const uint32_t old = un4SdSpu2Handler.function;
++                un4SdSpu2Handler = {a0, a1, cpu.gpr[28]};
++                setV0(old);
++                return true;
++            }
++            case 28: // sceSdGetTransIntrHandlerArgument(ch)
++                setV0(un4SdTransHandlers[a0 & 1u].argument);
++                return true;
++            case 29: // sceSdGetSpu2IntrHandlerArgument
++                setV0(un4SdSpu2Handler.argument);
++                return true;
++            default:
++                return false;
++            }
++        }
++
++        uint64_t un4SdNextCycle(uint64_t limit) const
++        {
++            for (const Un4SdBlock &block : un4SdBlocks)
++                if (block.active)
++                    limit = std::min(limit, block.nextCycle);
++            return limit;
++        }
++
++        void un4ServiceSd()
++        {
++            if (un4ServicingSd)
++                return;
++            un4ServicingSd = true;
++            try
++            {
++                for (uint32_t ch = 0; ch < 2u; ++ch)
++                {
++                    Un4SdBlock &block = un4SdBlocks[ch];
++                    // no maximo algumas metades por vez (se o IOP ficou muito tempo parado, nao dispara centenas)
++                    for (int guard = 0; guard < 4 && block.active && totalCycles >= block.nextCycle; ++guard)
++                    {
++                        const uint64_t step = un4SdHalfCycles(block.size);
++                        block.nextCycle += step;
++                        if (block.nextCycle + 8u * step < totalCycles)
++                            block.nextCycle = totalCycles + step;
++                        if (block.half == 1u && !block.loop)
++                            block.active = false;
++                        block.half ^= 1u;
++                        const Un4SdHandler handler = un4SdTransHandlers[ch];
++                        if (handler.function != 0u)
++                            (void)callFunction(handler.function, ch, handler.argument, 0u, 0u, handler.gp, 100000u);
++                        if ((++un4SdInterrupts % 6000u) == 1u)
++                        {
++                            std::ostringstream out;
++                            out << "[un4sd] interrupcoes do SPU2 simuladas: " << un4SdInterrupts;
++                            log(LogLevel::Info, out.str());
++                        }
++                    }
++                }
++            }
++            catch (...)
++            {
++                un4ServicingSd = false;
++                throw;
++            }
++            un4ServicingSd = false;
++        }
+     };
+ 
+     IopEmulator::IopEmulator(IopHost &host)

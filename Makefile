@@ -17,7 +17,7 @@ S_FILES   := $(shell find asm -name '*.s' -not -path 'asm/funcs/*' 2>/dev/null)
 BIN_FILES := $(shell find assets -name '*.bin' 2>/dev/null)
 O_FILES   := $(S_FILES:%=$(BUILD)/%.o) $(BIN_FILES:%=$(BUILD)/%.o)
 
-.PHONY: all tools setup check clean distclean match progress
+.PHONY: all tools setup split check clean distclean match progress recomp-csv
 
 all: check
 
@@ -26,6 +26,14 @@ tools:
 
 setup:
 	$(PYTHON) tools/setup.py
+
+# Regera o asm (use depois de mudar config/SLUS_218.62.yaml ou config/symbol_addrs.txt)
+split:
+	rm -rf asm assets $(BUILD)/asm $(BUILD)/assets
+	$(PYTHON) -m splat split config/$(BASENAME).yaml
+
+recomp-csv:
+	$(PYTHON) tools/make_recomp_csv.py
 
 $(BUILD)/%.s.o: %.s
 	@mkdir -p $(dir $@)
@@ -44,6 +52,7 @@ $(ROM): $(ELF)
 
 # Compara o executavel reconstruido com o original (byte a byte)
 check: $(ROM)
+	@test -f asm/main/text.s || (echo "asm/ nao existe: rode make setup (ou make split)" >&2; exit 1)
 	@$(PYTHON) tools/check.py $(ROM) baserom/$(BASENAME).rom
 
 # Compara uma funcao em C com o original: make match FUNC=func_00123456

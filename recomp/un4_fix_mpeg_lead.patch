@@ -1,0 +1,16 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+index 44eaef4..4a28774 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -482,7 +482,10 @@ namespace ps2_stubs
+         // NTSC-style fields at ~59.94 Hz to keep MPEG timing yet (29.97 fps).
+         constexpr uint64_t kDefaultPictureIntervalQ32 = 2ull * kPictureClockOne;
+         constexpr size_t kMpegTimingScanLimit = 4096u;
+-        constexpr size_t kMaxDecodedPicturesAhead = 8u;
++        // UN4Decomp: o player do UN4 so liga a exibicao quando o buffer de audio do video enche, e o audio
++        // chega pelos callbacks do demux. Com so 8 quadros de folga o demux parava antes de o audio encher
++        // (no PS2 o limite real e o buffer de bitstream do sceMpeg, ~0,6 s). 60 quadros = ~2 s de folga.
++        constexpr size_t kMaxDecodedPicturesAhead = 60u;
+ 
+         struct MpegPlaybackState
+         {

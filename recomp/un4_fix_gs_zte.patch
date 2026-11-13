@@ -1,0 +1,26 @@
+diff --git a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+index c31140a..e387d92 100644
+--- a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+@@ -878,7 +878,11 @@ void GSCpuBackend::WritePixel(const GSDrawState &state, int x, int y, int z, uin
+         return;
+     }
+ 
+-    const uint32_t ztestMethod = static_cast<uint32_t>((ctx.test >> 17) & 3u);
++    // UN4Decomp: com TEST.ZTE=0 o GS de verdade nao testa nem grava Z (o PCSX2 faz igual). O UN4 copia o
++    // quadro (contexto 2) com ZTE=0 e ZBUF_2 apontando para o proprio buffer de desenho: gravar Z ali
++    // apagava o quadro inteiro para preto a cada frame.
++    const bool zTestEnabled = ((ctx.test >> 16) & 1u) != 0u;
++    const uint32_t ztestMethod = zTestEnabled ? static_cast<uint32_t>((ctx.test >> 17) & 3u) : 1u;
+     const bool alphaBlendEnabled = state.prim.abe;
+     const bool preserveDestinationAlpha = writeMask.writeRgb && !writeMask.writeAlpha && fpsm == GS_PSM_CT32;
+     const bool destinationAlphaTestNeedsRead = ((ctx.test >> 14) & 0x1u) != 0u && (fpsm == GS_PSM_CT32 || fpsm == GS_PSM_CT16 || fpsm == GS_PSM_CT16S);
+@@ -1007,7 +1011,7 @@ void GSCpuBackend::WritePixel(const GSDrawState &state, int x, int y, int z, uin
+         WriteVramUnlocked(fpsm, fbp, fbw, x, y, pixel);
+     }
+ 
+-    if (writeMask.writeDepth && !ctx.zbuf.zmask)
++    if (writeMask.writeDepth && !ctx.zbuf.zmask && zTestEnabled)
+     {
+         WriteVramUnlocked(zpsm, zbp, fbw, x, y, z);
+     }

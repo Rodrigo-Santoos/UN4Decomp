@@ -1,0 +1,248 @@
+--- a/ps2xRuntime/src/lib/ps2_pad.cpp
++++ b/ps2xRuntime/src/lib/ps2_pad.cpp
+@@ -1,6 +1,20 @@
+ #include "runtime/ps2_pad.h"
+ #include "ps2_host_backend.h"
+ #include <cstring>
++#include <atomic>
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <iostream>
++#include <string>
++#include <thread>
++#if !defined(_WIN32)
++#include <arpa/inet.h>
++#include <netinet/in.h>
++#include <netinet/tcp.h>
++#include <sys/socket.h>
++#include <unistd.h>
++#endif
+ 
+ namespace
+ {
+@@ -25,7 +39,108 @@
+     constexpr uint16_t PAD_L2 = 0x0100u;
+ }
+ 
+-bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t size)
++// UN4Decomp: ponte de controle. O jogo roda dentro do WSL, que nao enxerga o controle USB do Windows.
++// Um script do lado do Windows (recomp/pad_bridge.ps1) le o controle pelo XInput e manda o estado por TCP
++// (uma linha de texto por leitura: "botoes gatilhoE gatilhoD lx ly rx ry"); aqui so guardamos o ultimo estado.
++namespace un4padbridge
++{
++    struct State
++    {
++        std::atomic<uint32_t> buttons{0};
++        std::atomic<int> lt{0}, rt{0}, lx{0}, ly{0}, rx{0}, ry{0};
++        std::atomic<int64_t> lastMs{0};
++    };
++
++    static State &state()
++    {
++        static State s;
++        return s;
++    }
++
++    static int64_t nowMs()
++    {
++        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
++    }
++
++#if !defined(_WIN32)
++    static void serve(int port)
++    {
++        const int srv = ::socket(AF_INET, SOCK_STREAM, 0);
++        if (srv < 0)
++            return;
++        int one = 1;
++        ::setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
++        sockaddr_in addr{};
++        addr.sin_family = AF_INET;
++        addr.sin_addr.s_addr = htonl(INADDR_ANY);
++        addr.sin_port = htons(static_cast<uint16_t>(port));
++        if (::bind(srv, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0 || ::listen(srv, 1) != 0)
++        {
++            std::cerr << "[un4pad] nao consegui abrir a porta " << port << " para a ponte do controle" << std::endl;
++            ::close(srv);
++            return;
++        }
++        std::cerr << "[un4pad] esperando a ponte do controle na porta " << port << std::endl;
++        for (;;)
++        {
++            const int cli = ::accept(srv, nullptr, nullptr);
++            if (cli < 0)
++                continue;
++            ::setsockopt(cli, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
++            std::cerr << "[un4pad] ponte do controle conectada" << std::endl;
++            std::string pending;
++            char buf[512];
++            for (;;)
++            {
++                const ssize_t n = ::recv(cli, buf, sizeof(buf), 0);
++                if (n <= 0)
++                    break;
++                pending.append(buf, static_cast<size_t>(n));
++                size_t nl;
++                while ((nl = pending.find('\n')) != std::string::npos)
++                {
++                    unsigned btn = 0;
++                    int lt = 0, rt = 0, lx = 0, ly = 0, rx = 0, ry = 0;
++                    if (std::sscanf(pending.c_str(), "%u %d %d %d %d %d %d", &btn, &lt, &rt, &lx, &ly, &rx, &ry) == 7)
++                    {
++                        State &s = state();
++                        s.buttons = btn; s.lt = lt; s.rt = rt; s.lx = lx; s.ly = ly; s.rx = rx; s.ry = ry;
++                        s.lastMs = nowMs();
++                    }
++                    pending.erase(0, nl + 1);
++                }
++                if (pending.size() > 4096)
++                    pending.clear();
++            }
++            ::close(cli);
++            state().lastMs = 0;
++            std::cerr << "[un4pad] ponte do controle desconectada" << std::endl;
++        }
++    }
++#endif
++
++    static void ensureStarted()
++    {
++#if !defined(_WIN32)
++        static std::atomic<bool> started{false};
++        if (started.exchange(true))
++            return;
++        const char *env = std::getenv("UN4_PAD_PORT");
++        const int port = (env && *env) ? std::atoi(env) : 28862;
++        if (port > 0)
++            std::thread(serve, port).detach();
++#endif
++    }
++
++    // Verdadeiro quando a ponte mandou um estado ha menos de meio segundo.
++    static bool active()
++    {
++        const int64_t last = state().lastMs.load();
++        return last != 0 && (nowMs() - last) < 500;
++    }
++}
++
++bool PSPadBackend::readState(int port, int /*slot*/, uint8_t *data, size_t size)
+ {
+     if (!data || size < 32)
+         return false;
+@@ -37,13 +152,56 @@
+     data[3] = 0xFF;
+     data[4] = data[5] = data[6] = data[7] = kPadStickCenter;
+ 
++    // UN4Decomp: o teclado/controle do PC e so o controle 1. Antes as duas portas recebiam os mesmos botoes,
++    // entao o jogador 2 repetia tudo o que o jogador 1 fazia.
++    if (port != 0)
++        return true;
++
+     uint16_t btns = 0xFFFFu;
+     constexpr int kGamepad = 0;
+     const bool useGamepad = IsGamepadAvailable(kGamepad);
+     auto clearBit = [&btns](uint16_t mask)
+     { btns &= ~mask; };
+ 
+-    if (useGamepad)
++    un4padbridge::ensureStarted();
++    if (un4padbridge::active())
++    {
++        // Botoes do XInput (controle de Xbox 360): A=X do PS2, B=bolinha, X=quadrado, Y=triangulo
++        un4padbridge::State &xs = un4padbridge::state();
++        const uint32_t b = xs.buttons.load();
++        if (b & 0x0001u) clearBit(PAD_UP);
++        if (b & 0x0002u) clearBit(PAD_DOWN);
++        if (b & 0x0004u) clearBit(PAD_LEFT);
++        if (b & 0x0008u) clearBit(PAD_RIGHT);
++        if (b & 0x0010u) clearBit(PAD_START);
++        if (b & 0x0020u) clearBit(PAD_SELECT);
++        if (b & 0x0040u) clearBit(PAD_L3);
++        if (b & 0x0080u) clearBit(PAD_R3);
++        if (b & 0x0100u) clearBit(PAD_L1);
++        if (b & 0x0200u) clearBit(PAD_R1);
++        if (b & 0x1000u) clearBit(PAD_CROSS);
++        if (b & 0x2000u) clearBit(PAD_CIRCLE);
++        if (b & 0x4000u) clearBit(PAD_SQUARE);
++        if (b & 0x8000u) clearBit(PAD_TRIANGLE);
++        if (xs.lt.load() > 60) clearBit(PAD_L2);
++        if (xs.rt.load() > 60) clearBit(PAD_R2);
++        auto axis = [](int v, bool invert) {
++            if (v > -8000 && v < 8000)
++                v = 0; // zona morta
++            int out = 128 + (invert ? -v : v) / 256;
++            return static_cast<uint8_t>(out < 0 ? 0 : (out > 255 ? 255 : out));
++        };
++        data[6] = axis(xs.lx.load(), false);
++        data[7] = axis(xs.ly.load(), true); // no XInput o Y cresce para cima; no PS2, para baixo
++        data[4] = axis(xs.rx.load(), false);
++        data[5] = axis(xs.ry.load(), true);
++        // o analogico esquerdo tambem vale como direcional
++        if (data[6] < 64) clearBit(PAD_LEFT);
++        if (data[6] > 192) clearBit(PAD_RIGHT);
++        if (data[7] < 64) clearBit(PAD_UP);
++        if (data[7] > 192) clearBit(PAD_DOWN);
++    }
++    else if (useGamepad)
+     {
+         if (IsGamepadButtonDown(kGamepad, GAMEPAD_BUTTON_LEFT_FACE_UP))
+             clearBit(PAD_UP);
+@@ -87,8 +245,9 @@
+         data[4] = static_cast<uint8_t>(128 + rx * 127);
+         data[5] = static_cast<uint8_t>(128 + ry * 127);
+     }
+-    else
++    if (!useGamepad || un4padbridge::active())
+     {
++        // o teclado continua valendo junto com a ponte do controle
+         if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W))
+             clearBit(PAD_UP);
+         if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S))
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -2488,6 +2488,7 @@
+     // A blank image to use as a framebuffer
+     Image blank = GenImageColor(FB_WIDTH, FB_HEIGHT, BLANK);
+     Texture2D frameTex = LoadTextureFromImage(blank);
++    SetTextureFilter(frameTex, TEXTURE_FILTER_BILINEAR); // UN4Decomp: suaviza a imagem ampliada na tela cheia
+     UnloadImage(blank);
+ 
+     std::atomic<bool> gameThreadFinished{false};
+@@ -2558,9 +2559,32 @@
+         const float srcHeight = static_cast<float>(std::max<uint32_t>(1u, presentHeight));
+         const float screenWidth = static_cast<float>(GetScreenWidth());
+         const float screenHeight = static_cast<float>(GetScreenHeight());
+-        const float scale = std::min(screenWidth / srcWidth, screenHeight / srcHeight);
+-        const float dstWidth = srcWidth * scale;
+-        const float dstHeight = srcHeight * scale;
++        // UN4Decomp: F11 liga/desliga a tela cheia (janela sem borda do tamanho do monitor) e F10 troca entre
++        // esticar a imagem na tela toda e manter a proporcao 4:3 com faixas pretas. UN4_FULLSCREEN=1 e
++        // UN4_STRETCH=0/1 escolhem como o jogo abre.
++        static bool s_un4Stretch = []() { const char *e = std::getenv("UN4_STRETCH"); return !e || e[0] != '0'; }();
++        static bool s_un4FullscreenPending = []() { const char *e = std::getenv("UN4_FULLSCREEN"); return e && e[0] == '1'; }();
++        static int s_un4FullscreenDelay = 30;
++        if (s_un4FullscreenPending && --s_un4FullscreenDelay <= 0)
++        {
++            s_un4FullscreenPending = false;
++            ToggleBorderlessWindowed();
++        }
++        if (IsKeyPressed(KEY_F11))
++            ToggleBorderlessWindowed();
++        if (IsKeyPressed(KEY_F10))
++            s_un4Stretch = !s_un4Stretch;
++        // sem esticar: a imagem do PS2 (640x448) ocupa uma area 4:3
++        const float aspect = 4.0f / 3.0f;
++        float dstWidth = screenWidth;
++        float dstHeight = screenHeight;
++        if (!s_un4Stretch)
++        {
++            if (screenWidth / screenHeight > aspect)
++                dstWidth = screenHeight * aspect;
++            else
++                dstHeight = screenWidth / aspect;
++        }
+         const Rectangle srcRect{0.0f, 0.0f, srcWidth, srcHeight};
+         const Rectangle dstRect{
+             (screenWidth - dstWidth) * 0.5f,

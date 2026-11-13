@@ -1,0 +1,26 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 915828e..720180e 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -774,6 +774,21 @@ int EeScheduler::rotateReadyQueue(int priority, bool interruptSafe)
+         m_currentThreadId = 0;
+         m_rescheduleRequested = true;
+     }
++    // UN4Decomp: RotateThreadReadyQueue costuma ser chamado em lacos de espera ("ja tem dado? nao -> passa a vez").
++    // No PS2 cada volta custa poucos ciclos, mas aqui cada troca de thread custa microssegundos no PC, e o tempo
++    // emulado (que decide quando vem o proximo vblank) quase nao anda: no player de video do UN4 eram ~25 mil
++    // voltas por vblank e o jogo caia para ~7 quadros por segundo. Contamos cada "passa a vez" como um pedaco
++    // maior de tempo emulado (padrao 4000 ciclos ~ 14 us); PS2X_YIELD_CYCLES muda o valor (0 desliga).
++    if (!interruptSafe)
++    {
++        static const uint32_t s_yieldCycles = []()
++        {
++            const char *value = std::getenv("PS2X_YIELD_CYCLES");
++            return value ? static_cast<uint32_t>(std::strtoul(value, nullptr, 10)) : 4000u;
++        }();
++        if (s_yieldCycles != 0u)
++            accountCycles(s_yieldCycles);
++    }
+     else
+     {
+         auto &queue = m_readyQueues[priority];

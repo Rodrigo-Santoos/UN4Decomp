@@ -1,0 +1,37 @@
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -1449,7 +1449,11 @@
+                     uint32_t asr1 = m_ioRegisters[channelBase + 0x50];
+                     uint32_t asp = (chcr >> 4) & 0x3u;
+                     const bool tieEnabled = (chcr & (1u << 7)) != 0u;
+-                    const int kMaxChainTags = 4096;
++                    // UN4Decomp: a lista de desenho de um quadro da luta do UN4 tem mais de 9 mil tags de DMA (cenario +
++                    // personagens + efeitos + HUD numa cadeia so). Com o limite antigo de 4096 a cadeia era cortada no
++                    // meio e tudo o que vinha depois do cenario (personagens, efeitos, HUD) nunca chegava ao VIF1.
++                    const int kMaxChainTags = 1 << 20;
++                    static std::atomic<uint32_t> s_un4MaxTagsSeen{4096u};
+                     std::vector<uint8_t> chainBuf;
+ 
+                     auto appendData = [&](uint32_t srcAddr, uint32_t qwCount)
+@@ -1536,7 +1540,7 @@
+                     // END que parou a cadeia (marcadores de callback no meio do quadro, ex.: filmes).
+                     uint32_t lastMadr = madr;
+ 
+-                    while (tagsProcessed < kMaxChainTags)
++                    while (tagsProcessed < kMaxChainTags && chainBuf.size() < (256u << 20))
+                     {
+                         const uint32_t currentTagAddr = tagAddr;
+                         const bool tagInSPR = isScratchpad(tagAddr);
+@@ -1658,6 +1662,12 @@
+                             break;
+                     }
+ 
++                    if (static_cast<uint32_t>(tagsProcessed) > s_un4MaxTagsSeen.load(std::memory_order_relaxed))
++                    {
++                        s_un4MaxTagsSeen.store(static_cast<uint32_t>(tagsProcessed), std::memory_order_relaxed);
++                        std::cerr << "[un4dma] canal 0x" << std::hex << channelBase << std::dec << ": cadeia com " << tagsProcessed
++                                  << " tags (" << (chainBuf.size() >> 10) << " KB), a maior ate agora" << std::endl;
++                    }
+                     m_ioRegisters[channelBase + 0x30] = un4DmaRegisterAddress(tagAddr);
+                     m_ioRegisters[channelBase + 0x10] = un4DmaRegisterAddress(lastMadr);
+                     m_ioRegisters[channelBase + 0x40] = asr0;

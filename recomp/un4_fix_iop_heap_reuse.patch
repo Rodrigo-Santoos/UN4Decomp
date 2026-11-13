@@ -1,0 +1,47 @@
+diff --git a/ps2xIOP/src/emulator/core/iop_memory.cpp b/ps2xIOP/src/emulator/core/iop_memory.cpp
+index 25e9b36..7baa1d8 100644
+--- a/ps2xIOP/src/emulator/core/iop_memory.cpp
++++ b/ps2xIOP/src/emulator/core/iop_memory.cpp
+@@ -1,3 +1,4 @@
++#include <vector>
+ #include "iop_memory.h"
+ 
+ #include <algorithm>
+@@ -299,7 +300,10 @@ namespace ps2x::iop::detail
+             return address;
+         }
+ 
+-        uint32_t candidate = alignUp(m_heapCursor, alignment);
++        // UN4Decomp: procura o primeiro espaco livre desde o inicio do heap (first-fit). Antes a busca comecava
++        // em m_heapCursor, que so cresce: a memoria devolvida com FreeSysMemory nunca era reaproveitada e,
++        // depois do primeiro filme, o segundo ja nao conseguia os 24 KB do audio (AllocIopHeap -> 0).
++        uint32_t candidate = alignUp(HeapBase, alignment);
+         for (;;)
+         {
+             bool overlap = false;
+@@ -339,7 +343,24 @@ namespace ps2x::iop::detail
+ 
+     uint32_t IopMemory::maxFreeMemory() const
+     {
+-        return m_heapCursor < HeapLimit ? HeapLimit - m_heapCursor : 0u;
++        // UN4Decomp: maior espaco livre de verdade (considera os blocos ja devolvidos)
++        std::vector<Allocation> blocks;
++        for (const auto &block : m_allocations)
++            if (block.address < HeapLimit && block.address + block.size > HeapBase)
++                blocks.push_back(block);
++        std::sort(blocks.begin(), blocks.end(), [](const Allocation &a, const Allocation &b)
++                  { return a.address < b.address; });
++        uint32_t cursor = HeapBase;
++        uint32_t best = 0u;
++        for (const auto &block : blocks)
++        {
++            if (block.address > cursor)
++                best = std::max(best, block.address - cursor);
++            cursor = std::max(cursor, block.address + block.size);
++        }
++        if (HeapLimit > cursor)
++            best = std::max(best, HeapLimit - cursor);
++        return best;
+     }
+ 
+     std::optional<IopMemory::Allocation> IopMemory::allocationContaining(uint32_t address) const

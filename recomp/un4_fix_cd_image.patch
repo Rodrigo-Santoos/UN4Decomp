@@ -1,0 +1,325 @@
+diff --git a/ps2xIOP/src/emulator/imports/iop_cdvd.cpp b/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
+index ad58fb4..291cd0e 100644
+--- a/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
++++ b/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
+@@ -7,6 +7,7 @@
+ #include "ps2x/iop/ps2_path.h"
+ 
+ #include <algorithm>
++#include <cstdio>
+ #include <array>
+ #include <cctype>
+ #include <cstring>
+@@ -594,12 +595,123 @@ namespace ps2x::iop::detail
+             return &nodes[current];
+         }
+ 
++        // UN4Decomp: com imagem ISO configurada, procura no diretorio real da imagem (LBNs reais).
++        bool readImageSector(uint32_t lba, uint8_t *dst)
++        {
++            const std::string imagePath = host.hostPath(HostPathKind::CdImage);
++            if (imagePath.empty())
++                return false;
++            if (imageHandle == 0u)
++                imageHandle = host.openHostFile(imagePath);
++            if (imageHandle == 0u)
++                return false;
++            size_t bytesRead = 0u;
++            return host.readHostFile(imageHandle, static_cast<uint64_t>(lba) * kSectorSize, dst, kSectorSize, bytesRead) &&
++                   bytesRead == kSectorSize;
++        }
++
++        static uint32_t readLe32(const uint8_t *b)
++        {
++            return b[0] | (b[1] << 8u) | (b[2] << 16u) | (static_cast<uint32_t>(b[3]) << 24u);
++        }
++
++        bool imageLookup(const std::string &guestPath, uint32_t &lbnOut, uint32_t &sizeOut, bool &dirOut)
++        {
++            std::array<uint8_t, kSectorSize> sector{};
++            if (!readImageSector(kPrimaryVolumeDescriptorLsn, sector.data()) || sector[0] != 1u ||
++                std::memcmp(sector.data() + 1u, "CD001", 5u) != 0)
++                return false;
++            uint32_t dirLba = readLe32(sector.data() + 156u + 2u);
++            uint32_t dirSize = readLe32(sector.data() + 156u + 10u);
++            bool isDirectory = true;
++
++            std::string path = guestPath;
++            const size_t colon = path.find(':');
++            if (colon != std::string::npos)
++                path = path.substr(colon + 1u);
++            std::vector<std::string> parts;
++            std::string cur;
++            for (char c : path)
++            {
++                if (c == '\\' || c == '/')
++                {
++                    if (!cur.empty())
++                        parts.push_back(normalizedIsoComponent(cur));
++                    cur.clear();
++                }
++                else
++                    cur.push_back(c);
++            }
++            if (!cur.empty())
++                parts.push_back(normalizedIsoComponent(cur));
++
++            for (const std::string &part : parts)
++            {
++                bool found = false;
++                const uint32_t sectors = (dirSize + kSectorSize - 1u) / kSectorSize;
++                for (uint32_t s = 0u; s < sectors && !found; ++s)
++                {
++                    if (!readImageSector(dirLba + s, sector.data()))
++                        return false;
++                    uint32_t off = 0u;
++                    while (off < kSectorSize)
++                    {
++                        const uint8_t len = sector[off];
++                        if (len == 0u || off + len > kSectorSize)
++                            break;
++                        const uint8_t nameLen = sector[off + 32u];
++                        if (nameLen > 1u)
++                        {
++                            std::string name(reinterpret_cast<const char *>(sector.data() + off + 33u), nameLen);
++                            name = normalizedIsoComponent(name);
++                            if (!name.empty() && name.back() == '.')
++                                name.pop_back();
++                            if (name == part)
++                            {
++                                dirLba = readLe32(sector.data() + off + 2u);
++                                dirSize = readLe32(sector.data() + off + 10u);
++                                isDirectory = (sector[off + 25u] & 2u) != 0u;
++                                found = true;
++                                break;
++                            }
++                        }
++                        off += len;
++                    }
++                }
++                if (!found)
++                    return false;
++            }
++            lbnOut = dirLba;
++            sizeOut = dirSize;
++            dirOut = isDirectory;
++            return true;
++        }
++
+         bool searchFile(uint32_t resultAddress, uint32_t nameAddress)
+         {
+             if (resultAddress == 0u || nameAddress == 0u)
+                 return false;
+ 
+             const std::string guestPath = memory.readString(nameAddress, 1024u);
++            {
++                uint32_t lbn = 0u, size = 0u;
++                bool directory = false;
++                if (imageLookup(guestPath, lbn, size, directory))
++                {
++                    std::array<uint8_t, 32u> result{};
++                    writeLe32(result.data(), lbn);
++                    writeLe32(result.data() + 4u, size);
++                    std::string leaf = guestPath;
++                    const size_t slash = leaf.find_last_of("\\/:");
++                    if (slash != std::string::npos)
++                        leaf = leaf.substr(slash + 1u);
++                    leaf = normalizedIsoComponent(leaf);
++                    std::memcpy(result.data() + 8u, leaf.data(), std::min<size_t>(16u, leaf.size()));
++                    result[24u] = directory ? 2u : 0u;
++                    std::fprintf(stderr, "[un4iso] IOP %s -> LBN real 0x%x tamanho=0x%x\n", guestPath.c_str(), lbn, size);
++                    return memory.writeRam(resultAddress, result.data(), result.size());
++                }
++            }
+             IsoNode *node = findVirtualIsoNode(guestPath);
+             if (!node)
+                 return false;
+@@ -659,8 +771,13 @@ namespace ps2x::iop::detail
+                 return true;
+             }
+             const uint64_t byteCount64 = static_cast<uint64_t>(sectors) * kSectorSize;
+-            if (byteCount64 > IopMemory::RamSize || !memory.ownsRamRange(destination, static_cast<size_t>(byteCount64)))
++            // UN4Decomp: no IOP real o driver pode ler para qualquer endereco da RAM, mesmo que ainda nao
++            // tenha sido escrito/alocado (o SNDBASE usa um buffer proprio em 0x1ba400). So conferimos o limite fisico.
++            const uint32_t un4Physical = IopMemory::physicalAddress(destination);
++            if (byteCount64 > IopMemory::RamSize || un4Physical > IopMemory::RamSize ||
++                byteCount64 > IopMemory::RamSize - un4Physical)
+             {
++                std::fprintf(stderr, "[un4iso] IOP sceCdRead destino invalido lsn=0x%x setores=%u destino=0x%x\n", lsn, sectors, destination);
+                 lastError = kCdvdErrorRead;
+                 return false;
+             }
+@@ -700,9 +817,16 @@ namespace ps2x::iop::detail
+ 
+             if (!read || !memory.writeRam(destination, bytes.data(), bytes.size()))
+             {
++                std::fprintf(stderr, "[un4iso] IOP sceCdRead FALHOU lsn=0x%x setores=%u destino=0x%x imagem=%s\n",
++                             lsn, sectors, destination, imagePath.empty() ? "(nenhuma)" : imagePath.c_str());
+                 lastError = kCdvdErrorRead;
+                 return false;
+             }
++            {
++                static uint32_t s_un4Reads = 0u;
++                if (++s_un4Reads <= 40u)
++                    std::fprintf(stderr, "[un4iso] IOP sceCdRead lsn=0x%x setores=%u destino=0x%x\n", lsn, sectors, destination);
++            }
+             lastError = kCdvdErrorNone;
+             return true;
+         }
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+index b1bb6d8..2eaeeb9 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+@@ -1,3 +1,7 @@
++#include <iostream>
++#include <cstring>
++#include <vector>
++#include <fstream>
+ #include <algorithm>
+ #include <cctype>
+ 
+@@ -322,6 +326,100 @@ namespace
+         }
+     }
+ 
++    // UN4Decomp: procura um arquivo no diretorio ISO9660 da imagem real, para usar os LBNs reais
++    // (os mesmos que o IOP usa ao ler da imagem). Retorna false se nao houver imagem ou arquivo.
++    bool un4IsoLookup(const std::filesystem::path &image, const std::string &ps2Path, uint32_t &lbnOut, uint32_t &sizeOut)
++    {
++        if (image.empty())
++            return false;
++        std::ifstream iso(image, std::ios::binary);
++        if (!iso)
++            return false;
++        auto readSector = [&](uint32_t lba, uint8_t *dst) -> bool
++        {
++            iso.seekg(static_cast<std::streamoff>(lba) * 2048, std::ios::beg);
++            iso.read(reinterpret_cast<char *>(dst), 2048);
++            return static_cast<bool>(iso);
++        };
++        auto le32 = [](const uint8_t *b) -> uint32_t
++        { return b[0] | (b[1] << 8) | (b[2] << 16) | (static_cast<uint32_t>(b[3]) << 24); };
++        uint8_t sector[2048];
++        if (!readSector(16, sector) || sector[0] != 1 || std::memcmp(sector + 1, "CD001", 5) != 0)
++            return false;
++        uint32_t dirLba = le32(sector + 156 + 2);
++        uint32_t dirSize = le32(sector + 156 + 10);
++
++        std::string path = ps2Path;
++        const size_t colon = path.find(':');
++        if (colon != std::string::npos)
++            path = path.substr(colon + 1);
++        std::vector<std::string> parts;
++        std::string cur;
++        for (char c : path)
++        {
++            if (c == '\\' || c == '/')
++            {
++                if (!cur.empty())
++                    parts.push_back(cur);
++                cur.clear();
++            }
++            else
++                cur.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
++        }
++        if (!cur.empty())
++            parts.push_back(cur);
++        if (parts.empty())
++            return false;
++        for (std::string &part : parts)
++        {
++            const size_t semi = part.find(';');
++            if (semi != std::string::npos)
++                part.resize(semi);
++        }
++
++        for (size_t i = 0; i < parts.size(); ++i)
++        {
++            const bool last = (i + 1 == parts.size());
++            bool found = false;
++            const uint32_t sectors = (dirSize + 2047) / 2048;
++            for (uint32_t s = 0; s < sectors && !found; ++s)
++            {
++                if (!readSector(dirLba + s, sector))
++                    return false;
++                uint32_t off = 0;
++                while (off < 2048)
++                {
++                    const uint8_t len = sector[off];
++                    if (len == 0 || off + len > 2048)
++                        break;
++                    const uint8_t nameLen = sector[off + 32];
++                    std::string name(reinterpret_cast<const char *>(sector + off + 33), nameLen);
++                    const size_t semi = name.find(';');
++                    if (semi != std::string::npos)
++                        name.resize(semi);
++                    if (!name.empty() && name.back() == '.')
++                        name.pop_back();
++                    for (char &c : name)
++                        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
++                    const bool isDir = (sector[off + 25] & 2) != 0;
++                    if (nameLen > 1 && name == parts[i] && isDir != last)
++                    {
++                        dirLba = le32(sector + off + 2);
++                        dirSize = le32(sector + off + 10);
++                        found = true;
++                        break;
++                    }
++                    off += len;
++                }
++            }
++            if (!found)
++                return false;
++        }
++        lbnOut = dirLba;
++        sizeOut = dirSize;
++        return true;
++    }
++
+     bool registerCdFile(const std::string &ps2Path, CdFileEntry &entryOut)
+     {
+         const std::string key = cdPathKey(ps2Path);
+@@ -392,7 +490,19 @@ namespace
+         entry.baseLbn = g_nextPseudoLbn;
+         entry.sectors = sectorsForBytes(sizeBytes);
+ 
+-        g_nextPseudoLbn += entry.sectors + 1;
++        uint32_t un4RealLbn = 0, un4RealSize = 0;
++        if (un4IsoLookup(getCdImagePath(), ps2Path, un4RealLbn, un4RealSize))
++        {
++            entry.baseLbn = un4RealLbn;
++            static uint32_t s_un4IsoLog = 0;
++            if (++s_un4IsoLog <= 64u)
++                std::cerr << "[un4iso] EE " << ps2Path << " -> LBN real 0x" << std::hex << un4RealLbn
++                          << " tamanho=0x" << un4RealSize << std::dec << std::endl;
++        }
++        else
++        {
++            g_nextPseudoLbn += entry.sectors + 1;
++        }
+         g_cdFilesByKey.emplace(key, entry);
+         entryOut = entry;
+         g_lastCdError = 0;
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 45cb9d2..2ed4fe6 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1,3 +1,4 @@
++#include <cstdlib>
+ #include "ps2_runtime.h"
+ #include "ps2_log.h"
+ #include "ps2_stubs.h"
+@@ -1065,6 +1066,13 @@ void PS2Runtime::configureIoPathsFromElf(const std::string &elfPath)
+         paths.mcRoot = paths.elfDirectory / "mc0";
+     }
+ 
++    // UN4Decomp: imagem ISO real (PS2X_CD_IMAGE=/caminho/jogo.iso) para EE e IOP usarem os LBNs reais
++    if (const char *un4Image = std::getenv("PS2X_CD_IMAGE"); un4Image && *un4Image)
++    {
++        paths.cdImage = std::filesystem::path(un4Image);
++        std::cerr << "[un4iso] usando imagem do disco: " << un4Image << std::endl;
++    }
++
+     setIoPaths(paths);
+ }
+ 

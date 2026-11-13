@@ -1,0 +1,48 @@
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index e2dab74..847ced5 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -307,13 +307,42 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+     {
+         if (m_vif1PendingPath2ImageQwc != 0u)
+         {
++            // UN4Decomp: no hardware os dados de uma transferencia IMAGE que nao couberam no pacote do tag
++            // chegam num DIRECT/DIRECTHL seguinte (com NOP/FLUSH antes). O UN4 faz assim: se tratarmos esses
++            // VIFcodes como pixels, a textura fica deslocada em 16 bytes e a paleta (CLUT) em 8 (cores erradas).
++            uint32_t directLimitQw = 0u;
++            {
++                uint32_t peek = pos;
++                for (int i = 0; i < 8 && peek + 4u <= sizeBytes; ++i)
++                {
++                    uint32_t code = 0u;
++                    memcpy(&code, data + peek, 4);
++                    const uint8_t op = static_cast<uint8_t>((code >> 24) & 0x7Fu);
++                    if (op == VIF_DIRECT || op == VIF_DIRECTHL)
++                    {
++                        const uint32_t qw = (code & 0xFFFFu) ? (code & 0xFFFFu) : 65536u;
++                        if (qw <= m_vif1PendingPath2ImageQwc)
++                        {
++                            directLimitQw = qw;
++                            pos = peek + 4u;
++                        }
++                        break;
++                    }
++                    if (code != 0u && op != VIF_NOP && op != VIF_FLUSH && op != VIF_FLUSHA && op != VIF_FLUSHE)
++                        break;
++                    peek += 4u;
++                }
++            }
++
+             const uint32_t availableQw = (sizeBytes - pos) / 16u;
+             if (availableQw == 0u)
+             {
+                 break;
+             }
+ 
+-            const uint32_t chunkQw = std::min<uint32_t>(m_vif1PendingPath2ImageQwc, availableQw);
++            uint32_t chunkQw = std::min<uint32_t>(m_vif1PendingPath2ImageQwc, availableQw);
++            if (directLimitQw != 0u)
++                chunkQw = std::min<uint32_t>(chunkQw, directLimitQw);
+             std::vector<uint8_t> imagePacket(16u + static_cast<size_t>(chunkQw) * 16u, 0u);
+             const uint64_t imageTag =
+                 static_cast<uint64_t>(chunkQw & 0x7FFFu) |

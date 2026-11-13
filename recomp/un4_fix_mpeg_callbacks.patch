@@ -1,0 +1,148 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+index 4a28774..f109dfc 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -1642,17 +1642,80 @@ namespace ps2_stubs
+             }
+         }
+ 
++        // UN4Decomp: no hardware, os callbacks de stream (sceMpegAddStrCallback) rodam DENTRO de
++        // sceMpegDemuxPss/Ring, antes da funcao retornar. A versao original enfileirava os callbacks
++        // de forma assincrona e eles nunca chegavam a rodar no Naruto UN4 (o audio do filme nunca
++        // enchia e o player esperava para sempre). Aqui eles rodam em sequencia na thread que chamou
++        // o demux, e so depois a thread continua (o valor de retorno ja deve estar em v0).
++        // Os dados de cada callback (sceMpegCbDataStr) ficam no topo da pilha de invocacao.
+         void dispatchStreamCallbacksUnlocked(uint8_t *rdram,
+                                              R5900Context *ctx,
+                                              PS2Runtime *runtime,
+                                              const std::vector<MpegStreamCallbackEvent> &events)
+         {
+-            if (events.empty())
++            if (events.empty() || !rdram || !ctx || !runtime)
++            {
++                return;
++            }
++
++            constexpr size_t kMaxSyncCallbacks = 192u; // 192 * 0x20 = 0x1800 de uma pilha de 0x4000
++            EeScheduler &ee = runtime->eeScheduler();
++            std::vector<GuestInvocation> invocations;
++            std::vector<MpegStreamCallbackEvent> overflow;
++            uint32_t top = 0u;
++            for (const MpegStreamCallbackEvent &event : events)
++            {
++                for (const MpegRegisteredCallback &callback : event.callbacks)
++                {
++                    if (callback.func == 0u || !runtime->hasFunction(callback.func))
++                    {
++                        continue;
++                    }
++                    if (invocations.size() >= kMaxSyncCallbacks)
++                    {
++                        MpegStreamCallbackEvent rest = event;
++                        rest.callbacks = {callback};
++                        overflow.push_back(std::move(rest));
++                        continue;
++                    }
++                    if (top == 0u)
++                    {
++                        top = ee.invocationStackTop();
++                    }
++                    const uint32_t cbDataAddr = top - static_cast<uint32_t>(invocations.size() + 1u) * kMpegCallbackDataSize;
++                    if (!writeMpegCallbackData(rdram, cbDataAddr, event))
++                    {
++                        continue;
++                    }
++                    GuestInvocation invocation{};
++                    invocation.kind = GuestInvocationKind::RpcCallback;
++                    invocation.context = *ctx;
++                    invocation.context.pc = callback.func;
++                    SET_GPR_U32(&invocation.context, 4, event.mpegAddr);
++                    SET_GPR_U32(&invocation.context, 5, cbDataAddr);
++                    SET_GPR_U32(&invocation.context, 6, callback.data);
++                    SET_GPR_U32(&invocation.context, 7, 0u);
++                    SET_GPR_U32(&invocation.context, 31, 0u);
++                    invocations.push_back(std::move(invocation));
++                }
++            }
++
++            if (!overflow.empty())
++            {
++                dispatchStreamCallbacks(rdram, ctx, runtime, overflow);
++            }
++            if (invocations.empty())
+             {
+                 return;
+             }
+ 
+-            dispatchStreamCallbacks(rdram, ctx, runtime, events);
++            const uint32_t dataBottom = top - static_cast<uint32_t>(invocations.size()) * kMpegCallbackDataSize;
++            const uint32_t sp = (dataBottom - 0x40u) & ~0xFu;
++            for (GuestInvocation &invocation : invocations)
++            {
++                SET_GPR_U32(&invocation.context, 29, sp);
++            }
++            ee.invokeCurrentSequence(std::move(invocations));
+         }
+ 
+         void writeBlankMpegFrame(uint8_t *rdram, uint32_t destAddr, uint32_t width, uint32_t height)
+@@ -1944,6 +2007,17 @@ namespace ps2_stubs
+         std::lock_guard<std::mutex> lock(g_mpeg_stub_mutex);
+         g_mpeg_stub_state.initialized = true;
+         (void)getPlaybackState(mpegAddr);
++        // UN4Decomp: o jogo registra o mesmo callback de novo a cada filme sem apagar o anterior;
++        // registrar duas vezes faria cada pedaco de audio/video ser entregue em dobro.
++        for (const MpegRegisteredCallback &existing : g_mpeg_stub_state.callbacksByMpeg[mpegAddr])
++        {
++            if (existing.stream && existing.type == streamType && existing.func == callbackFunc &&
++                existing.data == callbackData)
++            {
++                setReturnU32(ctx, 0u);
++                return;
++            }
++        }
+         const uint32_t handle = g_mpeg_stub_state.nextCallbackHandle++;
+         g_mpeg_stub_state.callbacksByMpeg[mpegAddr].push_back(
+             MpegRegisteredCallback{streamType, streamId, callbackFunc, callbackData, handle, true});
+@@ -2144,8 +2218,8 @@ namespace ps2_stubs
+             });
+         }
+ 
+-        dispatchStreamCallbacksUnlocked(rdram, ctx, runtime, callbackEvents);
+         setReturnS32(ctx, static_cast<int32_t>(consumed));
++        dispatchStreamCallbacksUnlocked(rdram, ctx, runtime, callbackEvents);
+     }
+ 
+     void sceMpegDemuxPssRing(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+@@ -2238,8 +2312,8 @@ namespace ps2_stubs
+             });
+         }
+ 
+-        dispatchStreamCallbacksUnlocked(rdram, ctx, runtime, callbackEvents);
+         setReturnS32(ctx, static_cast<int32_t>(consumed));
++        dispatchStreamCallbacksUnlocked(rdram, ctx, runtime, callbackEvents);
+     }
+ 
+     void sceMpegDispCenterOffX(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/SIF.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/SIF.cpp
+index dc975ed..0f0f113 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/SIF.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/SIF.cpp
+@@ -303,7 +303,17 @@ namespace ps2_stubs
+     {
+         (void)rdram;
+         const uint32_t reqSize = getRegU32(ctx, 4);
+-        setReturnU32(ctx, runtime ? runtime->allocateIopMemory(reqSize, 64u) : 0u);
++        const uint32_t addr = runtime ? runtime->allocateIopMemory(reqSize, 64u) : 0u;
++        {   // UN4Decomp: registra as alocacoes de memoria do IOP (o player de video recebeu endereco 0)
++            static uint32_t s_un4Logs = 0u;
++            if (s_un4Logs < 40u || addr == 0u)
++            {
++                ++s_un4Logs;
++                std::cerr << "[un4iop] AllocIopHeap tam=0x" << std::hex << reqSize << " -> 0x" << addr << std::dec
++                          << (addr == 0u ? " FALHOU" : "") << std::endl;
++            }
++        }
++        setReturnU32(ctx, addr);
+     }
+ 
+     void sceSifAllocSysMemory(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)

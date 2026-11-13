@@ -1,0 +1,504 @@
+diff --git a/ps2xRuntime/include/runtime/gs/gs_frontend.h b/ps2xRuntime/include/runtime/gs/gs_frontend.h
+--- a/ps2xRuntime/include/runtime/gs/gs_frontend.h
++++ b/ps2xRuntime/include/runtime/gs/gs_frontend.h
+@@ -145,10 +145,16 @@
+ 
+     void refreshDisplaySnapshot();
+ 
++    // UN4Decomp: gsdump (gravar um quadro do GS e reproduzir fora do jogo; ver un4_gsdump.h)
++    void un4SaveState(std::vector<uint8_t> &out) const;
++    void un4LoadState(const uint8_t *data, size_t size);
++    void un4SetPrivRegs(struct GSRegisters *privRegs) { m_privRegs = privRegs; }
++
+     void WriteVram(uint32_t psm, uint32_t base, uint32_t bw, uint32_t x, uint32_t y, uint32_t value);
+     uint32_t ReadVram(uint32_t psm, uint32_t base, uint32_t bw, uint32_t x, uint32_t y) const;
+ 
+ private:
++    void un4DumpHook();
+     void snapshotVRAM();
+     void writeRegisterUnlocked(uint8_t regAddr, uint64_t value);
+     void writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi);
+diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+--- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+@@ -3,6 +3,8 @@
+ #include "runtime/gs/gs_cpu_backend.h"
+ #include "ps2_log.h"
+ #include "runtime/ps2_memory.h"
++#include "runtime/gs/un4_gsdump.h"
++#include <type_traits>
+ #include <atomic>
+ #include <algorithm>
+ #include <cmath>
+@@ -639,9 +641,147 @@
+     return true;
+ }
+ 
++// ---------------------------------------------------------------------------------------------
++// UN4Decomp: gsdump
++// ---------------------------------------------------------------------------------------------
++#define UN4_GSD_FIELDS(X) \
++    X(m_ctx) X(m_prim) X(m_primRegister) X(m_prmodeRegister) \
++    X(m_curR) X(m_curG) X(m_curB) X(m_curA) X(m_curQ) X(m_curS) X(m_curT) X(m_curU) X(m_curV) \
++    X(m_curFog) X(m_fogR) X(m_fogG) X(m_fogB) X(m_prmodecont) X(m_pabe) X(m_scanmsk) X(m_dimx) \
++    X(m_dthe) X(m_colclamp) X(m_texa) X(m_texclut) X(m_bitbltbuf) X(m_trxpos) X(m_trxreg) X(m_trxdir) \
++    X(m_vtxQueue) X(m_vtxCount) X(m_vtxIndex) X(m_preferredDisplaySourceFrame) X(m_preferredDisplayDestFbp) \
++    X(m_hasPreferredDisplaySource)
++
++void GS::un4SaveState(std::vector<uint8_t> &out) const
++{
++    std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++#define UN4_GSD_PUT(f) static_assert(std::is_trivially_copyable_v<decltype(f)>); un4gsdump::putv(out, f);
++    UN4_GSD_FIELDS(UN4_GSD_PUT)
++#undef UN4_GSD_PUT
++    if (const auto *cpu = dynamic_cast<const GSCpuBackend *>(m_backend.get()))
++        cpu->Un4SaveState(out);
++}
++
++void GS::un4LoadState(const uint8_t *data, size_t size)
++{
++    std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    const uint8_t *p = data;
++    size_t left = size;
++#define UN4_GSD_GET(f) un4gsdump::get(p, left, &f, sizeof(f));
++    UN4_GSD_FIELDS(UN4_GSD_GET)
++#undef UN4_GSD_GET
++    if (auto *cpu = dynamic_cast<GSCpuBackend *>(m_backend.get()))
++        cpu->Un4LoadState(p, left);
++}
++
++namespace
++{
++    void un4PutPrivRegs(std::vector<uint8_t> &b, const GSRegisters *r, uint64_t tick)
++    {
++        const uint64_t v[8] = {r->pmode, r->smode2, r->dispfb1, r->display1, r->dispfb2, r->display2, r->bgcolor, tick};
++        un4gsdump::putv(b, un4gsdump::kVsync);
++        un4gsdump::putv(b, static_cast<uint32_t>(sizeof(v)));
++        un4gsdump::put(b, v, sizeof(v));
++    }
++}
++
++// Chamado com m_stateMutex travado, no comeco de cada entrada publica que muda o GS.
++void GS::un4DumpHook()
++{
++    un4gsdump::State &d = un4gsdump::st();
++    if (!d.active && !d.armed && d.requests.load(std::memory_order_relaxed) == 0 &&
++        (d.envParsed && d.autoTicks.empty()))
++        return;
++    if (!m_privRegs || !m_localMemoryStorage)
++        return;
++    un4gsdump::parseEnvOnce();
++    const uint64_t tick = m_privRegs->vsyncTick.load(std::memory_order_relaxed);
++
++    if (!d.active)
++    {
++        if (!d.armed)
++        {
++            bool want = false;
++            if (d.requests.load(std::memory_order_acquire) > 0)
++            {
++                d.requests.fetch_sub(1, std::memory_order_acq_rel);
++                want = true;
++            }
++            for (size_t i = 0; i < d.autoTicks.size(); ++i)
++            {
++                if (tick >= d.autoTicks[i])
++                {
++                    d.autoTicks.erase(d.autoTicks.begin() + static_cast<std::ptrdiff_t>(i));
++                    want = true;
++                    break;
++                }
++            }
++            if (!want || d.written >= d.maxDumps)
++                return;
++            d.armed = true;
++            d.startTick = tick;
++            return;
++        }
++        if (tick == d.startTick)
++            return;
++        // comeco da gravacao: estado + VRAM inteira, antes do primeiro comando deste vblank
++        d.active = true;
++        d.armed = false;
++        d.startTick = tick;
++        d.lastTick = tick;
++        d.buf.clear();
++        d.buf.reserve(32u << 20);
++        un4gsdump::put(d.buf, "UN4GSDMP", 8);
++        un4gsdump::putv(d.buf, un4gsdump::kVersion);
++        std::vector<uint8_t> state;
++        un4SaveState(state);
++        un4gsdump::putv(d.buf, static_cast<uint32_t>(state.size()));
++        un4gsdump::put(d.buf, state.data(), state.size());
++        un4gsdump::putv(d.buf, m_localMemorySize);
++        un4gsdump::put(d.buf, m_localMemoryStorage, m_localMemorySize);
++        un4PutPrivRegs(d.buf, m_privRegs, tick);
++        std::cerr << "[un4gsdump] gravando a partir do vblank " << tick << " (" << d.vblanks << " vblanks)" << std::endl;
++        return;
++    }
++
++    if (tick == d.lastTick)
++        return;
++    d.lastTick = tick;
++    un4PutPrivRegs(d.buf, m_privRegs, tick);
++    if (tick - d.startTick < d.vblanks)
++        return;
++
++    un4gsdump::putv(d.buf, un4gsdump::kEnd);
++    un4gsdump::putv(d.buf, 0u);
++    char name[64];
++    std::snprintf(name, sizeof(name), "/gsdump_%06llu.bin", static_cast<unsigned long long>(d.startTick));
++    const std::string path = un4gsdump::dir() + name;
++    if (FILE *f = std::fopen(path.c_str(), "wb"))
++    {
++        std::fwrite(d.buf.data(), 1, d.buf.size(), f);
++        std::fclose(f);
++        ++d.written;
++        std::cerr << "[un4gsdump] salvo " << path << " (" << (d.buf.size() >> 10) << " KB)" << std::endl;
++    }
++    else
++    {
++        std::cerr << "[un4gsdump] falhou ao criar " << path << std::endl;
++    }
++    d.active = false;
++    d.buf.clear();
++    d.buf.shrink_to_fit();
++}
++
++#define UN4_GSD_REC(kind, size) \
++    (un4gsdump::st().active ? (un4gsdump::putv(un4gsdump::st().buf, static_cast<uint32_t>(kind)), \
++                               un4gsdump::putv(un4gsdump::st().buf, static_cast<uint32_t>(size)), true) : false)
++
+ void GS::processGIFPacket(const uint8_t *data, uint32_t sizeBytes)
+ {
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    un4DumpHook();
++    if (data && UN4_GSD_REC(un4gsdump::kGif, sizeBytes))
++        un4gsdump::put(un4gsdump::st().buf, data, sizeBytes);
+     if (!data || sizeBytes < 16 || !m_backend)
+         return;
+     un4prof::gifPackets().fetch_add(1u, std::memory_order_relaxed);
+@@ -745,6 +885,12 @@
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
+     if (!data || sizeBytes < 16u || !m_backend)
+         return false;
++    un4DumpHook();
++    const size_t un4Mark = un4gsdump::st().buf.size();
++    const bool un4Rec = UN4_GSD_REC(un4gsdump::kPacked, sizeBytes);
++    if (un4Rec)
++        un4gsdump::put(un4gsdump::st().buf, data, sizeBytes);
++    const bool un4Ok = [&]() -> bool {
+ 
+     if (!validatePackedGifPacket(data, sizeBytes))
+         return false;
+@@ -778,6 +924,10 @@
+ 
+     ++m_nativePackedGIFPacketCount;
+     return true;
++    }();
++    if (!un4Ok && un4Rec && un4gsdump::st().active)
++        un4gsdump::st().buf.resize(un4Mark); // o chamador cai no processGIFPacket, que grava de novo
++    return un4Ok;
+ }
+ 
+ void GS::uploadImageNative(uint64_t bitbltbuf,
+@@ -788,6 +938,14 @@
+                            uint32_t sizeBytes)
+ {
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    un4DumpHook();
++    if (UN4_GSD_REC(un4gsdump::kUpload, 32u + (data ? sizeBytes : 0u)))
++    {
++        const uint64_t regs[4] = {bitbltbuf, trxpos, trxreg, trxdir};
++        un4gsdump::put(un4gsdump::st().buf, regs, sizeof(regs));
++        if (data)
++            un4gsdump::put(un4gsdump::st().buf, data, sizeBytes);
++    }
+     uploadImageNativeUnlocked(bitbltbuf, trxpos, trxreg, trxdir, data, sizeBytes);
+ }
+ 
+@@ -1066,6 +1224,12 @@
+ void GS::writeRegister(uint8_t regAddr, uint64_t value)
+ {
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    un4DumpHook();
++    if (UN4_GSD_REC(un4gsdump::kReg, 16u))
++    {
++        const uint64_t v[2] = {regAddr, value};
++        un4gsdump::put(un4gsdump::st().buf, v, sizeof(v));
++    }
+     writeRegisterUnlocked(regAddr, value);
+ }
+ 
+@@ -1610,7 +1774,8 @@
+                       << " sc=" << c.scissor.x0 << "-" << c.scissor.x1 << "," << c.scissor.y0 << "-" << c.scissor.y1
+                       << " xy=" << int(x0) << "," << int(y0) << "-" << int(x1) << "," << int(y1)
+                       << " rgba=" << int(v.r) << "," << int(v.g) << "," << int(v.b) << "," << int(v.a)
+-                      << " pabe=" << m_pabe << std::endl;
++                      << " pabe=" << m_pabe << " z=" << v.z << std::hex << " zbuf=" << c.zbuf.zbp << "/" << int(c.zbuf.psm)
++                      << "/" << int(c.zbuf.zmask) << std::dec << std::endl;
+         }
+         recordDrawDebugEventUnlocked(needed);
+     }
+@@ -1652,12 +1817,24 @@
+ bool GS::clearFramebufferContext(uint32_t contextIndex, uint32_t rgba)
+ {
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    un4DumpHook();
++    if (UN4_GSD_REC(un4gsdump::kClear, 8u))
++    {
++        const uint32_t v[2] = {contextIndex, rgba};
++        un4gsdump::put(un4gsdump::st().buf, v, sizeof(v));
++    }
+     return m_backend && m_backend->ClearFramebuffer(m_ctx[(contextIndex != 0u) ? 1 : 0], rgba);
+ }
+ 
+ bool GS::clearActiveFramebuffer(uint32_t rgba)
+ {
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    un4DumpHook();
++    if (UN4_GSD_REC(un4gsdump::kClear, 8u))
++    {
++        const uint32_t v[2] = {0xFFFFFFFFu, rgba};
++        un4gsdump::put(un4gsdump::st().buf, v, sizeof(v));
++    }
+     return m_backend && m_backend->ClearFramebuffer(activeContext(), rgba);
+ }
+ 
+@@ -1705,6 +1882,12 @@
+ void GS::WriteVram(uint32_t psm, uint32_t base, uint32_t bw, uint32_t x, uint32_t y, uint32_t value)
+ {
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    un4DumpHook();
++    if (UN4_GSD_REC(un4gsdump::kWriteVram, 24u))
++    {
++        const uint32_t v[6] = {psm, base, bw, x, y, value};
++        un4gsdump::put(un4gsdump::st().buf, v, sizeof(v));
++    }
+     if (m_backend)
+         m_backend->WriteVram(psm, base, bw, x, y, value);
+ }
+diff --git a/ps2xRuntime/include/runtime/gs/gs_cpu_backend.h b/ps2xRuntime/include/runtime/gs/gs_cpu_backend.h
+--- a/ps2xRuntime/include/runtime/gs/gs_cpu_backend.h
++++ b/ps2xRuntime/include/runtime/gs/gs_cpu_backend.h
+@@ -33,6 +33,10 @@
+     void SnapshotVram(std::vector<uint8_t> &out) const override;
+     GSTransferSnapshot GetTransferSnapshot() const override;
+ 
++    // UN4Decomp: gsdump
++    void Un4SaveState(std::vector<uint8_t> &out) const;
++    void Un4LoadState(const uint8_t *&p, size_t &left);
++
+ private:
+     void ResetUnlocked();
+     void LoadClutUnlocked(const GSTex0Reg &tex0, const GSTexClutReg &texclut);
+diff --git a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+--- a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+@@ -6,6 +6,8 @@
+ #include "runtime/gs/ps2_gs_psmt4.h"
+ #include "runtime/gs/ps2_gs_psmt8.h"
+ #include "runtime/gs/ps2_gs_memory.h"
++#include "runtime/gs/un4_gsdump.h"
++#include <type_traits>
+ #include "ps2_log.h"
+ #include <atomic>
+ #include <algorithm>
+@@ -699,6 +701,28 @@
+     std::memcpy(out.data(), m_vram, m_vramSize);
+ }
+ 
++// UN4Decomp: gsdump - estado do backend que influencia os desenhos (CLUT carregada, transferencia em andamento)
++void GSCpuBackend::Un4SaveState(std::vector<uint8_t> &out) const
++{
++    std::lock_guard<std::mutex> lock(m_mutex);
++    static_assert(std::is_trivially_copyable_v<GSTransferCommand>);
++    static_assert(std::is_trivially_copyable_v<GSTransferSnapshot>);
++    un4gsdump::putv(out, m_clut);
++    un4gsdump::putv(out, m_clutCbp);
++    un4gsdump::putv(out, m_transfer);
++    un4gsdump::putv(out, m_transferState);
++}
++
++void GSCpuBackend::Un4LoadState(const uint8_t *&p, size_t &left)
++{
++    std::lock_guard<std::mutex> lock(m_mutex);
++    un4gsdump::get(p, left, &m_clut, sizeof(m_clut));
++    un4gsdump::get(p, left, &m_clutCbp, sizeof(m_clutCbp));
++    un4gsdump::get(p, left, &m_transfer, sizeof(m_transfer));
++    un4gsdump::get(p, left, &m_transferState, sizeof(m_transferState));
++    m_texturePageCache.Invalidate();
++}
++
+ GSTransferSnapshot GSCpuBackend::GetTransferSnapshot() const
+ {
+     std::lock_guard<std::mutex> lock(m_mutex);
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -6,6 +6,7 @@
+ #include "game_overrides.h"
+ #include "ps2_runtime_macros.h"
+ #include "runtime/gs/gs_frontend.h"
++#include "runtime/gs/un4_gsdump.h"
+ #include "runtime/ee_scheduler.h"
+ #include "ThreadNaming.h"
+ #include "Kernel/Stubs/Audio.h"
+@@ -376,6 +377,12 @@
+ 
+ static void UploadFrame(Texture2D &tex, PS2Runtime *rt, uint32_t &outWidth, uint32_t &outHeight)
+ {
++    // UN4Decomp: F9 grava os proximos vblanks do GS em gsdump_*.bin (ver un4_gsdump.h)
++    if (IsKeyPressed(KEY_F9))
++    {
++        un4gsdump::request(0u);
++        std::cerr << "[un4gsdump] F9 apertado: gravando o proximo quadro" << std::endl;
++    }
+     static uint64_t s_lastPresentationTick = std::numeric_limits<uint64_t>::max();
+     static bool s_hasLatchedInitialFrame = false;
+     static uint32_t s_lastDisplayFbp = std::numeric_limits<uint32_t>::max();
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1,4 +1,5 @@
+ #include "un4_profile.h"
++#include "runtime/gs/un4_gsdump.h"
+ #include <iostream>
+ #include "runtime/ee_scheduler.h"
+ 
+@@ -1953,6 +1954,9 @@
+                 ++s_bigTitleCount;
+             std::cerr << "[un4draw] ---- captura de 1 quadro, vblank " << m_vsyncTick << " modo=" << mode << (big ? " (grande)" : "") << std::endl;
+             un4prof::gsCaptureBudget().store(big ? 1500 : 120);
++            // UN4Decomp: grava 1 quadro do GS (gsdump) na 1a captura grande do titulo e do MODE SELECT
++            if (big && (mode == 7u || s_bigTitleCount == 1))
++                un4gsdump::request(mode);
+         }
+ 
+         if ((m_vsyncTick % 300u) == 0u)
+diff --git a/ps2xRuntime/include/runtime/gs/un4_gsdump.h b/ps2xRuntime/include/runtime/gs/un4_gsdump.h
+new file mode 100644
+--- /dev/null
++++ b/ps2xRuntime/include/runtime/gs/un4_gsdump.h
+@@ -0,0 +1,121 @@
++#pragma once
++// UN4Decomp: gravacao de quadros do GS ("gsdump") para reproduzir fora do jogo.
++// Grava o estado do GS + a VRAM inteira no comeco de um vblank e depois tudo o que chega no GS
++// (pacotes GIF, uploads, registradores) durante alguns vblanks. O programa un4_gsreplay le o arquivo,
++// refaz os desenhos com o mesmo backend e salva a imagem de cada vblank.
++// Pedido: tecla F9 na janela do jogo, ou automatico (un4prof), ou UN4_GSDUMP_AT=vblank1,vblank2,...
++#include <atomic>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <string>
++#include <vector>
++
++namespace un4gsdump
++{
++    enum : uint32_t
++    {
++        kGif = 1u,
++        kPacked = 2u,
++        kUpload = 3u,
++        kReg = 4u,
++        kVsync = 5u,
++        kClear = 6u,
++        kWriteVram = 7u,
++        kEnd = 0xFFFFFFFFu,
++    };
++
++    constexpr uint32_t kVersion = 1u;
++
++    struct State
++    {
++        std::atomic<int> requests{0};
++        std::atomic<uint32_t> requestReason{0};
++        bool armed = false;
++        bool active = false;
++        uint64_t startTick = 0;
++        uint64_t lastTick = 0;
++        uint32_t vblanks = 4u;
++        uint32_t written = 0u;
++        uint32_t maxDumps = 12u;
++        std::vector<uint8_t> buf;
++        std::vector<uint64_t> autoTicks;
++        bool envParsed = false;
++    };
++
++    inline State &st()
++    {
++        static State s;
++        return s;
++    }
++
++    // reason: 0 = tecla F9, outros = automatico (modo do jogo)
++    inline void request(uint32_t reason = 0u)
++    {
++        State &s = st();
++        if (s.written >= s.maxDumps)
++            return;
++        s.requestReason.store(reason, std::memory_order_relaxed);
++        s.requests.fetch_add(1, std::memory_order_release);
++    }
++
++    inline void put(std::vector<uint8_t> &b, const void *p, size_t n)
++    {
++        const uint8_t *q = static_cast<const uint8_t *>(p);
++        b.insert(b.end(), q, q + n);
++    }
++
++    template <class T>
++    inline void putv(std::vector<uint8_t> &b, const T &v)
++    {
++        put(b, &v, sizeof(T));
++    }
++
++    inline void get(const uint8_t *&p, size_t &left, void *dst, size_t n)
++    {
++        if (left < n)
++        {
++            std::memset(dst, 0, n);
++            p += left;
++            left = 0;
++            return;
++        }
++        std::memcpy(dst, p, n);
++        p += n;
++        left -= n;
++    }
++
++    inline std::string dir()
++    {
++        const char *d = std::getenv("UN4_GSDUMP_DIR");
++        return (d && *d) ? std::string(d) : std::string(".");
++    }
++
++    inline void parseEnvOnce()
++    {
++        State &s = st();
++        if (s.envParsed)
++            return;
++        s.envParsed = true;
++        if (const char *v = std::getenv("UN4_GSDUMP_VBLANKS"))
++        {
++            const long n = std::strtol(v, nullptr, 10);
++            if (n > 0 && n < 64)
++                s.vblanks = static_cast<uint32_t>(n);
++        }
++        if (const char *v = std::getenv("UN4_GSDUMP_AT"))
++        {
++            const char *p = v;
++            while (*p)
++            {
++                char *end = nullptr;
++                const unsigned long long t = std::strtoull(p, &end, 10);
++                if (end == p)
++                    break;
++                s.autoTicks.push_back(static_cast<uint64_t>(t));
++                p = (*end == ',') ? end + 1 : end;
++            }
++        }
++    }
++}

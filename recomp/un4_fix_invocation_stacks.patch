@@ -1,0 +1,64 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 06b5427..85022a5 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -9,9 +9,19 @@
+ #include <cstring>
+ #include <limits>
+ #include <stdexcept>
++#include <vector>
+ 
+ namespace
+ {
++    // UN4Decomp: pilhas de invocacao (callbacks/interrupcoes) de threads que ja terminaram, para reutilizar.
++    // Antes cada thread nova ganhava pilhas de 16KB que nunca eram devolvidas; o UN4 cria e termina muitas
++    // threads ao carregar uma luta e o espaco acabava ("EE invocation stack space exhausted").
++    std::vector<uint32_t> &un4FreeInvocationStacks()
++    {
++        static std::vector<uint32_t> s_free;
++        return s_free;
++    }
++
+     constexpr int KE_OK = 0;
+     constexpr int KE_ERROR = -1;
+     constexpr int KE_ILLEGAL_PRIORITY = -403;
+@@ -1176,7 +1186,17 @@ uint32_t EeScheduler::invocationStackTop()
+         return existing->second;
+     }
+     constexpr uint32_t kInvocationStackSize = 0x4000u;
+-    const uint32_t top = m_runtime.reserveAsyncCallbackStack(kInvocationStackSize, 16u);
++    uint32_t top = 0u;
++    auto &freeStacks = un4FreeInvocationStacks();
++    if (!freeStacks.empty())
++    {
++        top = freeStacks.back();
++        freeStacks.pop_back();
++    }
++    else
++    {
++        top = m_runtime.reserveAsyncCallbackStack(kInvocationStackSize, 16u);
++    }
+     if (top == 0u)
+     {
+         throw std::runtime_error("EE invocation stack space exhausted");
+@@ -1653,6 +1673,20 @@ void EeScheduler::makeDormant(GuestThread &item)
+     item.suspendCount = 0;
+     item.wakeupCount = 0;
+     item.invocations.clear();
++    // UN4Decomp: sem invocacoes ativas, as pilhas de invocacao desta thread voltam para reuso
++    auto &freeStacks = un4FreeInvocationStacks();
++    for (auto it = m_invocationStackTops.begin(); it != m_invocationStackTops.end();)
++    {
++        if (static_cast<int32_t>(static_cast<uint32_t>(it->first >> 32u)) == item.id)
++        {
++            freeStacks.push_back(it->second);
++            it = m_invocationStackTops.erase(it);
++        }
++        else
++        {
++            ++it;
++        }
++    }
+ }
+ 
+ void EeScheduler::removeFromWaitObject(GuestThread &item)

@@ -1,0 +1,1118 @@
+diff --git a/ps2xRuntime/include/un4_profile.h b/ps2xRuntime/include/un4_profile.h
+new file mode 100644
+index 0000000..c106ab8
+--- /dev/null
++++ b/ps2xRuntime/include/un4_profile.h
+@@ -0,0 +1,501 @@
++#pragma once
++// UN4Decomp: medidor simples de funcoes recompiladas.
++// Cada funcao do jogo conta quantas vezes foi chamada; a cada poucos segundos o runtime imprime
++// as mais chamadas no periodo e as que rodaram pela primeira vez (mostra em que etapa o jogo esta).
++#include <algorithm>
++#include <cstdint>
++#include <iostream>
++#include <mutex>
++#include <chrono>
++#include <atomic>
++#include <cstring>
++#include <cstdio>
++#include <cstdlib>
++#include <string>
++#include <vector>
++#include <unordered_map>
++#if defined(__linux__)
++#include <csignal>
++#include <cxxabi.h>
++#include <dlfcn.h>
++#include <sys/time.h>
++#include <ucontext.h>
++#endif
++
++namespace un4prof
++{
++    struct Site
++    {
++        const char *name;
++        uint64_t count;
++        uint64_t last;
++        bool seen;
++    };
++
++    inline std::mutex &sitesMutex()
++    {
++        static std::mutex m;
++        return m;
++    }
++
++    inline std::vector<Site *> &sites()
++    {
++        static std::vector<Site *> v;
++        return v;
++    }
++
++    struct Registrar
++    {
++        explicit Registrar(Site *site)
++        {
++            std::lock_guard<std::mutex> lock(sitesMutex());
++            sites().push_back(site);
++        }
++    };
++
++    // UN4Decomp: quantos comandos VIF1 ainda devem ser registrados (o agendador liga isso em alguns quadros)
++    inline std::atomic<int> &vifTraceBudget()
++    {
++        static std::atomic<int> budget{0};
++        return budget;
++    }
++
++    // UN4Decomp: contadores do GS (pacotes GIF, bytes, desenhos) para medir o trabalho por intervalo
++    inline std::atomic<uint64_t> &gifPackets() { static std::atomic<uint64_t> v{0}; return v; }
++    inline std::atomic<uint64_t> &gifBytes() { static std::atomic<uint64_t> v{0}; return v; }
++    inline std::atomic<uint64_t> &gsDraws() { static std::atomic<uint64_t> v{0}; return v; }
++
++    // UN4Decomp: quantos desenhos/transferencias do GS ainda devem ser registrados (o agendador arma isso)
++    inline std::atomic<int> &gsCaptureBudget() { static std::atomic<int> v{0}; return v; }
++
++    // UN4Decomp: medidor de CPU por amostragem (Linux/WSL). A cada 1 ms de CPU o sinal SIGPROF anota em que
++    // funcao do PC o programa estava; o resumo mostra onde o tempo esta indo (precisa do link com -rdynamic).
++    namespace cpu
++    {
++        constexpr uint32_t kSamples = 1u << 16;
++        inline uintptr_t *samples() { static uintptr_t buf[kSamples]; return buf; }
++        inline std::atomic<uint32_t> &head() { static std::atomic<uint32_t> v{0}; return v; }
++#if defined(__linux__)
++        inline void onSignal(int, siginfo_t *, void *uctx)
++        {
++            const auto *uc = static_cast<const ucontext_t *>(uctx);
++#if defined(__x86_64__)
++            const uintptr_t pc = static_cast<uintptr_t>(uc->uc_mcontext.gregs[REG_RIP]);
++#elif defined(__aarch64__)
++            const uintptr_t pc = static_cast<uintptr_t>(uc->uc_mcontext.pc);
++#else
++            const uintptr_t pc = 0;
++#endif
++            const uint32_t i = head().fetch_add(1u, std::memory_order_relaxed);
++            samples()[i & (kSamples - 1u)] = pc;
++        }
++#endif
++        inline void start()
++        {
++#if defined(__linux__)
++            static bool started = false;
++            if (started)
++                return;
++            started = true;
++            if (const char *off = std::getenv("UN4_CPUPROF"); off && off[0] == '0')
++                return;
++            struct sigaction sa{};
++            sa.sa_sigaction = &onSignal;
++            sa.sa_flags = SA_SIGINFO | SA_RESTART;
++            sigemptyset(&sa.sa_mask);
++            sigaction(SIGPROF, &sa, nullptr);
++            itimerval tv{};
++            tv.it_interval.tv_usec = 1000;
++            tv.it_value.tv_usec = 1000;
++            setitimer(ITIMER_PROF, &tv, nullptr);
++#endif
++        }
++        inline void dump()
++        {
++#if defined(__linux__)
++            static uint32_t last = 0;
++            const uint32_t now = head().load();
++            uint32_t n = now - last;
++            if (n > kSamples)
++                n = kSamples;
++            std::unordered_map<uintptr_t, uint32_t> bySym;
++            std::unordered_map<uintptr_t, std::string> names;
++            for (uint32_t k = 0; k < n; ++k)
++            {
++                const uintptr_t pc = samples()[(now - n + k) & (kSamples - 1u)];
++                Dl_info info{};
++                uintptr_t key = pc;
++                if (pc && dladdr(reinterpret_cast<void *>(pc), &info) && info.dli_saddr)
++                {
++                    key = reinterpret_cast<uintptr_t>(info.dli_saddr);
++                    if (!names.count(key))
++                    {
++                        std::string nm = info.dli_sname ? info.dli_sname : "?";
++                        int st = 0;
++                        if (char *dem = abi::__cxa_demangle(nm.c_str(), nullptr, nullptr, &st))
++                        {
++                            nm = dem;
++                            std::free(dem);
++                        }
++                        if (nm.size() > 90u)
++                            nm.resize(90u);
++                        const char *lib = info.dli_fname ? std::strrchr(info.dli_fname, '/') : nullptr;
++                        names[key] = nm + " [" + (lib ? lib + 1 : "?") + "]";
++                    }
++                }
++                else
++                {
++                    key = pc & ~static_cast<uintptr_t>(0xFFF);
++                    if (!names.count(key))
++                    {
++                        char tmp[64];
++                        std::snprintf(tmp, sizeof(tmp), "sem nome perto de %p", reinterpret_cast<void *>(key));
++                        names[key] = tmp;
++                    }
++                }
++                ++bySym[key];
++            }
++            last = now;
++            std::vector<std::pair<uint32_t, uintptr_t>> top;
++            for (const auto &e : bySym)
++                top.emplace_back(e.second, e.first);
++            std::sort(top.begin(), top.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
++            std::cerr << "[un4cpu] " << n << " amostras (1 por ms de CPU, todas as threads):" << std::endl;
++            for (size_t i = 0; i < top.size() && i < 25u; ++i)
++                std::cerr << "[un4cpu]   " << (top[i].first * 100u / (n ? n : 1u)) << "% " << top[i].first << " "
++                          << names[top[i].second] << std::endl;
++#endif
++        }
++    }
++
++    inline void dumpGsCounters()
++    {
++        static uint64_t lastPk = 0, lastBy = 0, lastDr = 0;
++        const uint64_t pk = gifPackets().load(), by = gifBytes().load(), dr = gsDraws().load();
++        std::cerr << "[un4gs] no intervalo: pacotesGIF=" << (pk - lastPk) << " KB=" << ((by - lastBy) >> 10)
++                  << " desenhos=" << (dr - lastDr) << std::endl;
++        lastPk = pk; lastBy = by; lastDr = dr;
++    }
++
++    inline void dumpAll(uint64_t vblank)
++    {
++        std::lock_guard<std::mutex> lock(sitesMutex());
++        std::vector<std::pair<std::string, uint64_t>> active;
++        for (Site *site : sites())
++        {
++            const uint64_t delta = site->count - site->last;
++            if (delta)
++                active.emplace_back(site->name, delta);
++        }
++        std::sort(active.begin(), active.end());
++        std::cerr << "[un4all] vblank " << vblank << " " << active.size() << " funcoes:";
++        for (const auto &entry : active)
++            std::cerr << ' ' << entry.first << '=' << entry.second;
++        std::cerr << std::endl;
++    }
++
++    inline void dump(uint64_t vblank)
++    {
++        std::lock_guard<std::mutex> lock(sitesMutex());
++        std::vector<std::pair<uint64_t, Site *>> active;
++        std::vector<Site *> fresh;
++        for (Site *site : sites())
++        {
++            const uint64_t now = site->count;
++            const uint64_t delta = now - site->last;
++            site->last = now;
++            if (delta == 0u)
++                continue;
++            active.emplace_back(delta, site);
++            if (!site->seen)
++            {
++                site->seen = true;
++                fresh.push_back(site);
++            }
++        }
++        std::sort(active.begin(), active.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
++        {
++            // ritmo da emulacao: no PS2 sao ~60 vblanks por segundo; menos que isso = jogo lento
++            using clock = std::chrono::steady_clock;
++            static const clock::time_point s_start = clock::now();
++            static clock::time_point s_last = s_start;
++            static uint64_t s_lastVblank = 0u;
++            const clock::time_point now = clock::now();
++            const double total = std::chrono::duration<double>(now - s_start).count();
++            const double interval = std::chrono::duration<double>(now - s_last).count();
++            const double rate = interval > 0.0 ? static_cast<double>(vblank - s_lastVblank) / interval : 0.0;
++            std::cerr << "[un4tempo] vblank " << vblank << " tempo=" << static_cast<int>(total) << "s ritmo="
++                      << static_cast<int>(rate + 0.5) << " vblanks/s (60 = velocidade normal)" << std::endl;
++            s_last = now;
++            s_lastVblank = vblank;
++        }
++        std::cerr << "[un4prof] vblank " << vblank << ": " << active.size() << " funcoes ativas, "
++                  << fresh.size() << " novas" << std::endl;
++        std::cerr << "[un4prof]   mais chamadas:";
++        for (size_t i = 0; i < active.size() && i < 30u; ++i)
++            std::cerr << ' ' << active[i].second->name << '=' << active[i].first;
++        std::cerr << std::endl;
++        std::cerr << "[un4prof]   novas:";
++        for (size_t i = 0; i < fresh.size() && i < 120u; ++i)
++            std::cerr << ' ' << fresh[i]->name;
++        if (fresh.size() > 120u)
++            std::cerr << " ...(+" << (fresh.size() - 120u) << ")";
++        std::cerr << std::endl;
++        // funcoes vigiadas (sequencia de boot / logos / ROFS)
++        {
++            static const char *watch[] = {"001C8E20", "001C84B0", "001C8200", "00151CC0", "00151BD0", "0011E2C0",
++                                          "001DAE60", "00151BC0", "001C94D0", "00120F98", "001075A0", "003F5B20",
++                                          "00315EE0", "001C8A60", "00348300", "00152420", "00152230",
++                                          "00105120", "001079C0", "00101290", "001011C0", "00105200",
++                                          "sceMpegGetPicture", "00100EC0", "00100F60", "001052D0",
++                                          "00103BC0", "sceMpegDemuxPssRing", "00104F00", "00103D40",
++                                          "001044C0", "00104620", "00100BB0", "001008A0", "00100540", "00100490",
++                                          "00101390", "00104240", "001042C0", "00101EA0", "00100E90", "00103B50",
++                                          "00104F50", "00108CA0", "00108E90", "001047C0",
++                                          "001C9300", "001C6AC0", "001C6C30", "003179D0", "00317DD0", "00317870",
++                                          "001C8200", "001C87A0", "001C9290"};
++            std::cerr << "[un4prof]   vigiadas:";
++            for (Site *site : sites())
++                for (const char *w : watch)
++                    if (std::strstr(site->name, w))
++                        std::cerr << ' ' << site->name << "=" << site->count;
++            std::cerr << std::endl;
++        }
++        // funcoes ativas com poucas chamadas: costumam ser a "etapa" atual do jogo (chamada 1x por quadro)
++        std::cerr << "[un4prof]   1x por quadro (~" << 300 << "):";
++        size_t shown = 0;
++        for (const auto &entry : active)
++        {
++            if (entry.first >= 250u && entry.first <= 350u && shown < 60u)
++            {
++                std::cerr << ' ' << entry.second->name;
++                ++shown;
++            }
++        }
++        std::cerr << std::endl;
++    }
++}
++
++namespace un4prof
++{
++    // UN4Decomp: estado interno do leitor de streams da CRI (adxstm, 40 handles de 0x68 bytes em 0x416FA0),
++    // do driver de CD da CRI ("SRD", em 0x41DA58) e do carregador de arquivos do jogo (0x40B4A8).
++    inline void hexLine(const char *tag, const uint8_t *rdram, uint32_t addr, uint32_t size, const char *prefix = "[un4adx]")
++    {
++        static const char *digits = "0123456789abcdef";
++        std::string out;
++        out.reserve(size * 3u);
++        for (uint32_t i = 0; i < size; ++i)
++        {
++            if (i && (i % 4u) == 0u)
++                out.push_back(' ');
++            const uint8_t b = rdram[addr + i];
++            out.push_back(digits[b >> 4]);
++            out.push_back(digits[b & 15]);
++        }
++        std::cerr << prefix << ' ' << tag << " @0x" << std::hex << addr << std::dec << ": " << out << std::endl;
++    }
++
++    inline void dumpGuest(const uint8_t *rdram)
++    {
++        if (!rdram)
++            return;
++        for (uint32_t i = 0; i < 40u; ++i)
++        {
++            const uint32_t base = 0x416FA0u + i * 0x68u;
++            if (rdram[base] != 0u)
++            {
++                const std::string tag = "stm" + std::to_string(i);
++                hexLine(tag.c_str(), rdram, base, 0x68u);
++            }
++        }
++        hexLine("srd", rdram, 0x41DA58u, 0x90u);
++        auto rd32 = [&](uint32_t addr) -> uint32_t
++        {
++            uint32_t v = 0;
++            std::memcpy(&v, rdram + (addr & 0x1FFFFFFu), 4);
++            return v;
++        };
++        const uint32_t boot = rd32(0x609670u);
++        const uint32_t cri = rd32(0x6096F0u);
++        const uint32_t sys = rd32(0x609588u);
++        std::cerr << "[un4adx] boot: rofsPronto(D_6095EC)=" << int(rdram[0x6095ECu]) << " D_6095E8=" << int(rdram[0x6095E8u])
++                  << " cri(D_6096F0)=0x" << std::hex << cri << " cri+0x20=" << std::dec
++                  << int(cri ? rdram[(cri + 0x20u) & 0x1FFFFFFu] : 0xEEu) << " logos(D_609670)=0x" << std::hex << boot
++                  << " sys(D_609588)=0x" << sys << std::dec << std::endl;
++        if (boot)
++            hexLine("logos", rdram, boot & 0x1FFFFFFu, 0x18u);
++        {   // ultima mensagem de erro do CRI/ROFS (func_00120F98 escreve em D_0060BBF0) e o codigo (D_00409BD4)
++            char msg[129] = {};
++            std::memcpy(msg, rdram + 0x60BBF0u, 128u);
++            for (char &ch : msg)
++                if (ch != 0 && (ch < 0x20 || ch > 0x7E))
++                    ch = '.';
++            std::cerr << "[un4erro] cri/rofs codigo=" << static_cast<int32_t>(rd32(0x409BD4u)) << " msg=\"" << msg << "\"" << std::endl;
++        }
++        {   // modo do jogo depois do boot (D_00609650, usado pelo switch do MOTHER em 0x1C97D8)
++            const uint32_t mode = rd32(0x609650u);
++            std::cerr << "[un4modo] D_609650=0x" << std::hex << mode << std::dec << std::endl;
++            if (mode)
++                hexLine("modo", rdram, mode & 0x1FFFFFFu, 0x40u, "[un4modo]");
++            const uint32_t title = rd32(0x609658u);
++            if (title)
++            {
++                hexLine("titulo(D_609658)", rdram, title & 0x1FFFFFFu, 0x50u, "[un4modo]");
++                // objetos 3D da tela de titulo (+0x1C fundo, +0x2C/+0x30 aparecem na fase 4): alpha +0x88, malhas +0xFC
++                static const uint32_t kObjOffs[3] = {0x1Cu, 0x2Cu, 0x30u};
++                for (uint32_t oi = 0; oi < 3u; ++oi)
++                {
++                    const uint32_t obj = rd32((title + kObjOffs[oi]) & 0x1FFFFFFu) & 0x1FFFFFFu;
++                    if (!obj || obj >= 0x2000000u)
++                        continue;
++                    char lbl[48];
++                    std::snprintf(lbl, sizeof(lbl), "tobj+%X@%X", kObjOffs[oi], obj);
++                    hexLine(lbl, rdram, obj + 0x80u, 0x90u, "[un4obj]");
++                    const uint32_t info = rd32((obj + 0x90u) & 0x1FFFFFFu) & 0x1FFFFFFu;
++                    const uint32_t meshes = rd32((obj + 0xFCu) & 0x1FFFFFFu) & 0x1FFFFFFu;
++                    const uint32_t count = info ? rd32((info + 0x20u) & 0x1FFFFFFu) : 0u;
++                    for (uint32_t mi = 0; meshes && mi < count && mi < 4u; ++mi)
++                    {
++                        const uint32_t ent = meshes + mi * 16u;
++                        const uint32_t node = rd32(ent & 0x1FFFFFFu) & 0x1FFFFFFu;
++                        std::snprintf(lbl, sizeof(lbl), "tobj+%X.m%u tipo=%X", kObjOffs[oi], mi, rd32((ent + 8u) & 0x1FFFFFFu));
++                        if (node && node < 0x2000000u)
++                        {
++                            hexLine(lbl, rdram, node + 0x30u, 0x10u, "[un4obj] mundo.t");
++                            hexLine(lbl, rdram, node + 0x70u, 0x10u, "[un4obj] local.t");
++                            hexLine(lbl, rdram, node + 0x80u, 0x30u, "[un4obj] no");
++                        }
++                    }
++                }
++            }
++        }
++        if (sys)
++            hexLine("sys", rdram, sys & 0x1FFFFFFu, 0x90u);
++        if (boot)
++        {
++            // lista de telas de abertura: objeto+4 = {?, qtd, vetor}; mostra o vetor e cada item
++            const uint32_t list = rd32((boot + 0xCu) & 0x1FFFFFFu);
++            const uint32_t count = rd32((boot + 8u) & 0x1FFFFFFu);
++            std::cerr << "[un4adx] logos lista=0x" << std::hex << list << " qtd=" << std::dec << count << std::endl;
++            if (list && count && count < 32u)
++            {
++                hexLine("logos.vetor", rdram, list & 0x1FFFFFFu, count * 4u);
++                for (uint32_t i = 0; i < count; ++i)
++                {
++                    const uint32_t item = rd32((list + i * 4u) & 0x1FFFFFFu);
++                    if (item)
++                    {
++                        const std::string tag = "logos.item" + std::to_string(i);
++                        hexLine(tag.c_str(), rdram, item & 0x1FFFFFFu, 0x30u);
++                    }
++                }
++            }
++        }
++        hexLine("loader", rdram, 0x40B4A8u, 0x40u);
++        {   // UN4Decomp: player de video (fila de quadros D_006095B4, flags D_6095CC/D4/D8, objetos A0/A4/C8)
++            const uint32_t q = rd32(0x6095B4u), a0 = rd32(0x6095A0u), a4 = rd32(0x6095A4u), c8 = rd32(0x6095C8u);
++            std::cerr << "[un4mov] fila=0x" << std::hex << q << " A0=0x" << a0 << " A4=0x" << a4 << " C8=0x" << c8
++                      << " CC=" << rd32(0x6095CCu) << " D4=" << rd32(0x6095D4u) << " D8=" << rd32(0x6095D8u) << std::dec << std::endl;
++            if (q)
++                hexLine("fila", rdram, q & 0x1FFFFFFu, 0x30u, "[un4mov]");
++            if (c8)
++                hexLine("C8", rdram, c8 & 0x1FFFFFFu, 0x48u, "[un4mov]");
++            if (a0)
++                hexLine("A0", rdram, a0 & 0x1FFFFFFu, 0x40u, "[un4mov]");
++            if (a4)
++                hexLine("A4", rdram, a4 & 0x1FFFFFFu, 0x60u, "[un4mov]");
++            const uint32_t rb = rd32(0x60959Cu);
++            if (rb)
++                hexLine("ringbuf+60000", rdram, (rb + 0x60000u) & 0x1FFFFFFu, 0x20u, "[un4mov]");
++            std::cerr << "[un4mov] ringbuf=0x" << std::hex << rb << std::dec << std::endl;
++        }
++    }
++}
++
++namespace un4prof
++{
++    // UN4Decomp: registra argumentos e o estado do objeto (a0) na entrada de funcoes escolhidas
++    template <class Ctx>
++    inline void traceArgs(const char *name, uint32_t n, const uint8_t *rdram, const Ctx *ctx)
++    {
++        auto rd32 = [&](uint32_t addr) -> uint32_t
++        {
++            uint32_t v = 0;
++            std::memcpy(&v, rdram + (addr & 0x1FFFFFFu), 4);
++            return v;
++        };
++        const uint32_t a0 = getRegU32(ctx, 4);
++        std::cerr << "[un4trace] " << name << " #" << n << std::hex << " pc=0x" << ctx->pc << " a0=0x" << a0 << " a1=0x" << getRegU32(ctx, 5)
++                  << " a2=0x" << getRegU32(ctx, 6) << " a3=0x" << getRegU32(ctx, 7) << " ra=0x" << getRegU32(ctx, 31)
++                  << " heap(548/544/550)=0x" << rd32(0x609548u) << "/0x" << rd32(0x609544u) << "/0x" << rd32(0x609550u);
++        const uint32_t sys = rd32(0x609588u);
++        if (sys)
++            std::cerr << " sys+1c0=0x" << rd32(sys + 0x1C0u);
++        if (a0 >= 0x100000u && a0 < 0x2000000u)
++        {
++            std::cerr << " obj:";
++            for (uint32_t off = 0; off < 0x40u; off += 4u)
++                std::cerr << ' ' << rd32(a0 + off);
++            std::cerr << " +d0=" << rd32(a0 + 0xD0u) << " +d8=" << rd32(a0 + 0xD8u);
++        }
++        std::cerr << std::dec << std::endl;
++    }
++}
++
++#define UN4_TRACE(nm)                                                                    \
++    do                                                                                   \
++    {                                                                                    \
++        static uint32_t s_un4TraceN = 0;                                                 \
++        if (++s_un4TraceN <= 8u || (s_un4TraceN % 600u) == 0u)                           \
++            ::un4prof::traceArgs(nm, s_un4TraceN, rdram, ctx);                           \
++    } while (0)
++
++// UN4Decomp: registra registradores e campos do sprite num ponto exato de func_001C4AA0
++// (s5 = objeto, s1 = area de trabalho no scratchpad); so as 12 primeiras passagens por ponto.
++#define UN4_PEEK(tag)                                                                                          \
++    do                                                                                                         \
++    {                                                                                                          \
++        static uint32_t s_un4PeekN = 0;                                                                        \
++        if (++s_un4PeekN <= 12u)                                                                               \
++        {                                                                                                      \
++            const uint32_t _s1 = GPR_U32(ctx, 17), _s5 = GPR_U32(ctx, 21);                                     \
++            std::cerr << "[un4peek] " << tag << " #" << s_un4PeekN << std::hex << " s0=" << GPR_U32(ctx, 16)   \
++                      << " s1=" << _s1 << " s2=" << GPR_U32(ctx, 18) << " s5=" << _s5                          \
++                      << " v1=" << GPR_U32(ctx, 3) << " a0=" << GPR_U32(ctx, 4) << " a1=" << GPR_U32(ctx, 5)   \
++                      << " flags=" << READ32(_s5 + 4u) << " cnt=" << READ32(_s5 + 0x20u)                      \
++                      << " cap=" << READ32(_s5 + 0x24u) << " pos=" << READ32(_s1 + 0x190u) << ","              \
++                      << READ32(_s1 + 0x194u) << " tam=" << READ32(_s1 + 0x1A0u) << "," << READ32(_s1 + 0x1A4u) \
++                      << " xy=" << READ32(_s1 + 0x1D0u) << "," << READ32(_s1 + 0x1D4u)                         \
++                      << " wh=" << READ32(_s1 + 0x1E0u) << "," << READ32(_s1 + 0x1E4u)                         \
++                      << " n170=" << READ32(_s1 + 0x170u) << std::dec << std::endl;                            \
++        }                                                                                                      \
++    } while (0)
++
++// UN4Decomp: registra o texto (string C) apontado por um registrador num ponto exato do codigo
++#define UN4_STR(tag, reg)                                                                                  \
++    do                                                                                                     \
++    {                                                                                                      \
++        static uint32_t s_un4StrN = 0;                                                                     \
++        if (++s_un4StrN <= 60u)                                                                            \
++        {                                                                                                  \
++            const uint32_t _a = GPR_U32(ctx, reg);                                                         \
++            char _buf[161] = {};                                                                           \
++            for (uint32_t _i = 0; _i < 160u && _a; ++_i)                                                   \
++            {                                                                                              \
++                const uint8_t _c = rdram[(_a + _i) & 0x1FFFFFFu];                                          \
++                if (!_c)                                                                                   \
++                    break;                                                                                 \
++                _buf[_i] = (_c >= 0x20 && _c < 0x7F) ? static_cast<char>(_c) : '.';                        \
++            }                                                                                              \
++            std::cerr << "[un4path] " << tag << " #" << s_un4StrN << " r" << reg << "=\"" << _buf << "\"" << std::endl; \
++        }                                                                                                  \
++    } while (0)
++
++#define UN4_PROFILE(nm)                                                     \
++    do                                                                      \
++    {                                                                       \
++        static ::un4prof::Site s_un4Site{nm, 0u, 0u, false};                \
++        static ::un4prof::Registrar s_un4Registrar(&s_un4Site);             \
++        ++s_un4Site.count;                                                  \
++    } while (0)
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index 720180e..99d8f45 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -1,3 +1,4 @@
++#include "un4_profile.h"
+ #include <iostream>
+ #include "runtime/ee_scheduler.h"
+ 
+@@ -1929,6 +1930,90 @@ void EeScheduler::processEvent(const EeEvent &event)
+             }
+             std::cerr << std::endl;
+         }
++        if (m_vsyncTick == 1199u)
++            un4prof::vifTraceBudget().store(1500);
++        // UN4Decomp: registra os desenhos de 1 quadro a cada 600 vblanks
++        if ((m_vsyncTick % 600u) == 0u)
++        {
++            // no MODE SELECT (modo 7) registra um quadro inteiro uma vez; no resto, so o comeco do quadro
++            static bool s_bigDone = false;
++            static int s_bigTitleCount = 0;
++            const bool s_bigTitleDone = s_bigTitleCount >= 3;
++            uint32_t modePtr = 0, mode = 0;
++            if (m_rdram)
++            {
++                std::memcpy(&modePtr, m_rdram + 0x609650u, 4);
++                if (modePtr >= 0x100000u && modePtr < 0x2000000u)
++                    std::memcpy(&mode, m_rdram + modePtr, 4);
++            }
++            const bool big = ((mode == 7u && !s_bigDone) || (mode == 3u && !s_bigTitleDone)) && m_vsyncTick >= 600u;
++            if (big && mode == 7u)
++                s_bigDone = true;
++            if (big && mode == 3u)
++                ++s_bigTitleCount;
++            std::cerr << "[un4draw] ---- captura de 1 quadro, vblank " << m_vsyncTick << " modo=" << mode << (big ? " (grande)" : "") << std::endl;
++            un4prof::gsCaptureBudget().store(big ? 1500 : 120);
++        }
++
++        if ((m_vsyncTick % 300u) == 0u)
++        {
++            if (m_vsyncTick == 1200u)
++                un4prof::dumpAll(m_vsyncTick);
++            un4prof::dump(m_vsyncTick);
++            un4prof::dumpGuest(m_rdram);
++            un4prof::dumpGsCounters();
++            un4prof::cpu::start();
++            un4prof::cpu::dump();
++            {
++                const GSRegisters &gsr = m_runtime.memory().gs();
++                std::cerr << "[un4gs] pmode=0x" << std::hex << gsr.pmode << " smode2=0x" << gsr.smode2
++                          << " dispfb1=0x" << gsr.dispfb1 << " display1=0x" << gsr.display1
++                          << " dispfb2=0x" << gsr.dispfb2 << " display2=0x" << gsr.display2
++                          << " bgcolor=0x" << gsr.bgcolor << " csr=0x" << gsr.csr.load() << std::dec << std::endl;
++            }
++            // UN4Decomp: estado de cada thread (status, motivo da espera, pc/ra e enderecos de retorno na pilha)
++            std::vector<int> ids;
++            for (const auto &entry : m_threads)
++                ids.push_back(entry.first);
++            std::sort(ids.begin(), ids.end());
++            static const char *kStatus[] = {"rodando", "pronta", "esperando", "esperando+suspensa", "suspensa", "dormente"};
++            static const char *kReason[] = {"-", "sleep", "semaforo", "eventflag", "vsync", "externa", "mpeg"};
++            for (int id : ids)
++            {
++                const GuestThread &t = m_threads.at(id);
++                const R5900Context &c = t.activeContext();
++                const uint32_t sp = getRegU32(&c, 29);
++                std::cerr << "[un4thr] id=" << id << " entry=0x" << std::hex << t.entry << std::dec
++                          << " prio=" << t.currentPriority
++                          << " status=" << kStatus[static_cast<int>(t.status) % 6]
++                          << " espera=" << kReason[static_cast<int>(t.wait.reason) % 7];
++                if (const auto *sem = std::get_if<EeSemaphoreWait>(&t.wait.payload))
++                    std::cerr << "(sema " << sem->id << ")";
++                if (const auto *ext = std::get_if<EeExternalWait>(&t.wait.payload))
++                    std::cerr << "(tipo " << ext->type << ")";
++                std::cerr << " wakeups=" << t.wakeupCount << " susp=" << t.suspendCount
++                          << " invoc=" << t.invocations.size()
++                          << " pc=0x" << std::hex << c.pc << " ra=0x" << getRegU32(&c, 31) << " sp=0x" << sp << " pilha:";
++                if (m_rdram && sp >= 0x100000u && sp < 0x2000000u)
++                {
++                    int shown = 0;
++                    for (uint32_t off = 0; off < 0x600u && shown < 14; off += 4u)
++                    {
++                        const uint32_t addr = sp + off;
++                        if (addr + 4u > 0x2000000u)
++                            break;
++                        uint32_t w = 0;
++                        std::memcpy(&w, m_rdram + addr, 4);
++                        if ((w >= 0x100000u && w < 0x3F6180u) || (w >= 0x6B8200u && w < 0x89D980u))
++                        {
++                            std::cerr << " 0x" << w;
++                            ++shown;
++                        }
++                    }
++                }
++                std::cerr << std::dec << std::endl;
++            }
++        }
+         if (m_gsVSyncCallback != 0u && m_runtime.hasFunction(m_gsVSyncCallback))
+         {
+             GuestInvocation invocation{};
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+index f109dfc..8860115 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
+@@ -1588,8 +1588,19 @@ namespace ps2_stubs
+                                          const MpegStreamCallbackEvent &event,
+                                          const MpegRegisteredCallback &callback)
+         {
++            {
++                static uint32_t s_un4Disp[8] = {};
++                const uint32_t t = callback.type & 7u;
++                const uint32_t n = ++s_un4Disp[t];
++                if (n <= 4u || (n & (n - 1u)) == 0u)
++                    std::cerr << "[un4mpg] despacho callback tipo=" << callback.type << " n=" << n << " func=0x" << std::hex
++                              << callback.func << " dado=0x" << event.dataAddr << std::dec << " len=" << event.len
++                              << " sub=0x" << std::hex << (event.dataAddr ? static_cast<uint32_t>(rdram[event.dataAddr & 0x1FFFFFFu]) : 0u)
++                              << std::dec << std::endl;
++            }
+             if (!rdram || !callerCtx || !runtime || callback.func == 0u || !runtime->hasFunction(callback.func))
+             {
++                std::cerr << "[un4mpg] callback IGNORADO func=0x" << std::hex << callback.func << std::dec << std::endl;
+                 return;
+             }
+ 
+@@ -1616,8 +1627,13 @@ namespace ps2_stubs
+             GuestInvocation invocation{};
+             invocation.kind = GuestInvocationKind::RpcCallback;
+             invocation.context = callbackCtx;
+-            invocation.onComplete = [runtime, cbDataAddr](const R5900Context &, R5900Context &)
++            const uint32_t un4Type = callback.type;
++            invocation.onComplete = [runtime, cbDataAddr, un4Type](const R5900Context &done, R5900Context &)
+             {
++                static uint32_t s_un4Done[8] = {};
++                const uint32_t n = ++s_un4Done[un4Type & 7u];
++                if (n <= 4u || (n & (n - 1u)) == 0u)
++                    std::cerr << "[un4mpg] callback tipo=" << un4Type << " terminou n=" << n << " v0=" << getRegU32(&done, 2) << std::endl;
+                 runtime->guestFree(cbDataAddr);
+             };
+             runtime->eeScheduler().queueInvocation(std::move(invocation));
+@@ -1715,6 +1731,14 @@ namespace ps2_stubs
+             {
+                 SET_GPR_U32(&invocation.context, 29, sp);
+             }
++            {
++                static uint64_t s_un4Sync = 0u, s_un4SyncCb = 0u;
++                ++s_un4Sync;
++                s_un4SyncCb += invocations.size();
++                if (s_un4Sync <= 6u || (s_un4Sync & (s_un4Sync - 1u)) == 0u)
++                    std::cerr << "[un4mpg] callbacks sincronos #" << s_un4Sync << " agora=" << invocations.size()
++                              << " total=" << s_un4SyncCb << " pilha=0x" << std::hex << sp << std::dec << std::endl;
++            }
+             ee.invokeCurrentSequence(std::move(invocations));
+         }
+ 
+@@ -1997,7 +2021,6 @@ namespace ps2_stubs
+ 
+     void sceMpegAddStrCallback(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+-        (void)runtime;
+         const uint32_t mpegAddr = getRegU32(ctx, 4);
+         const uint32_t streamType = getRegU32(ctx, 5);
+         const uint32_t streamId = getRegU32(ctx, 6);
+@@ -2021,6 +2044,9 @@ namespace ps2_stubs
+         const uint32_t handle = g_mpeg_stub_state.nextCallbackHandle++;
+         g_mpeg_stub_state.callbacksByMpeg[mpegAddr].push_back(
+             MpegRegisteredCallback{streamType, streamId, callbackFunc, callbackData, handle, true});
++        std::cerr << "[un4mpg] AddStrCallback mpeg=0x" << std::hex << mpegAddr << " tipo=" << std::dec << streamType
++                  << " id=" << streamId << " func=0x" << std::hex << callbackFunc << " data=0x" << callbackData
++                  << " existe=" << (runtime && runtime->hasFunction(callbackFunc)) << std::dec << std::endl;
+         setReturnU32(ctx, 0u);
+     }
+ 
+@@ -2274,6 +2300,13 @@ namespace ps2_stubs
+ 
+         if (backpressured)
+         {
++            {
++                static uint64_t s_un4Bp = 0u;
++                ++s_un4Bp;
++                if (s_un4Bp <= 3u || (s_un4Bp % 200000u) == 0u)
++                    std::cerr << "[un4mpg] DemuxPssRing BACKPRESSURE #" << s_un4Bp << " decodificados=" << decodedCount
++                              << " avail=" << availableBytes << std::endl;
++            }
+             if (traceIdx < 32u)
+             {
+                 PS2_IF_AGRESSIVE_LOGS({
+@@ -2312,6 +2345,17 @@ namespace ps2_stubs
+             });
+         }
+ 
++        {
++            static uint64_t s_un4Calls = 0u, s_un4Bytes = 0u, s_un4Cb = 0u;
++            ++s_un4Calls;
++            s_un4Bytes += consumed;
++            s_un4Cb += callbackEvents.size();
++            if (s_un4Calls <= 8u || (s_un4Calls % 500u) == 0u)
++                std::cerr << "[un4mpg] DemuxPssRing #" << s_un4Calls << " avail=" << availableBytes << " consumido=" << consumed
++                          << " total=" << s_un4Bytes << " decodificados=" << decodedCount << " eventos=" << callbackEvents.size()
++                          << " eventosTotal=" << s_un4Cb << " ring=0x" << std::hex << ringBaseAddr << " tam=0x" << ringSize
++                          << std::dec << std::endl;
++        }
+         setReturnS32(ctx, static_cast<int32_t>(consumed));
+         dispatchStreamCallbacksUnlocked(rdram, ctx, runtime, callbackEvents);
+     }
+@@ -2435,6 +2479,18 @@ namespace ps2_stubs
+                         });
+                 }
+ 
++                {   // UN4Decomp: ritmo do filme (quadros entregues ao jogo por vsync)
++                    static uint64_t s_un4Served = 0u, s_un4LastTick = 0u, s_un4LastServed = 0u;
++                    ++s_un4Served;
++                    if ((s_un4Served % 30u) == 0u)
++                    {
++                        std::cerr << "[un4mpg] GetPicture entregues=" << s_un4Served << " (+" << (s_un4Served - s_un4LastServed)
++                                  << " em " << (currentTick - s_un4LastTick) << " vsyncs) prontos=" << playback.decodedFrames.size()
++                                  << " pts=" << nextFrame.pts90k << std::endl;
++                        s_un4LastTick = currentTick;
++                        s_un4LastServed = s_un4Served;
++                    }
++                }
+                 frame = std::move(playback.decodedFrames.front());
+                 playback.decodedFrames.pop_front();
+                 playback.width = static_cast<uint32_t>(frame.width);
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/SIF.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/SIF.cpp
+index 0f0f113..b592691 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/SIF.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/SIF.cpp
+@@ -364,14 +364,18 @@ namespace ps2_stubs
+     {
+         (void)rdram;
+         const uint32_t addr = getRegU32(ctx, 4);
+-        setReturnS32(ctx, runtime && runtime->freeIopMemory(addr) ? 0 : -1);
++        const bool ok = runtime && runtime->freeIopMemory(addr);
++        std::cerr << "[un4iop] FreeIopHeap 0x" << std::hex << addr << std::dec << (ok ? " ok" : " FALHOU") << std::endl;
++        setReturnS32(ctx, ok ? 0 : -1);
+     }
+ 
+     void sceSifFreeSysMemory(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
+         (void)rdram;
+         const uint32_t addr = getRegU32(ctx, 4);
+-        setReturnS32(ctx, runtime && runtime->freeIopMemory(addr) ? 0 : -1);
++        const bool ok = runtime && runtime->freeIopMemory(addr);
++        std::cerr << "[un4iop] FreeSysMemory 0x" << std::hex << addr << std::dec << (ok ? " ok" : " FALHOU") << std::endl;
++        setReturnS32(ctx, ok ? 0 : -1);
+     }
+ 
+     void sceSifGetDataTable(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
+index 22068df..992df9b 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Thread.cpp
+@@ -326,7 +326,7 @@ namespace ps2_syscalls
+     {
+         EeScheduler &ee = scheduler(rdram, ctx, runtime);
+         const int result = ee.suspendThread(static_cast<int>(getRegU32(ctx, 4)), false);
+-        std::cerr << "[un4] SuspendThread id=" << static_cast<int>(getRegU32(ctx, 4)) << " -> " << result << std::endl;
++        { static uint64_t s_un4n = 0; if (++s_un4n <= 10u) std::cerr << "[un4] SuspendThread id=" << static_cast<int>(getRegU32(ctx, 4)) << " -> " << result << std::endl; }
+         setReturnS32(ctx, result);
+         ee.transferIfRequested(false);
+     }
+@@ -335,7 +335,7 @@ namespace ps2_syscalls
+     {
+         EeScheduler &ee = scheduler(rdram, ctx, runtime);
+         const int result = ee.resumeThread(static_cast<int>(getRegU32(ctx, 4)), false);
+-        std::cerr << "[un4] ResumeThread id=" << static_cast<int>(getRegU32(ctx, 4)) << " -> " << result << std::endl;
++        { static uint64_t s_un4n = 0; if (++s_un4n <= 10u) std::cerr << "[un4] ResumeThread id=" << static_cast<int>(getRegU32(ctx, 4)) << " -> " << result << std::endl; }
+         setReturnS32(ctx, result);
+         ee.transferIfRequested(false);
+     }
+diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+index 9281d5f..4a260a9 100644
+--- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+@@ -1,3 +1,4 @@
++#include "un4_profile.h"
+ #include "runtime/gs/gs_frontend.h"
+ #include "runtime/gs/gs_cpu_backend.h"
+ #include "ps2_log.h"
+@@ -643,6 +644,8 @@ void GS::processGIFPacket(const uint8_t *data, uint32_t sizeBytes)
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
+     if (!data || sizeBytes < 16 || !m_backend)
+         return;
++    un4prof::gifPackets().fetch_add(1u, std::memory_order_relaxed);
++    un4prof::gifBytes().fetch_add(sizeBytes, std::memory_order_relaxed);
+ 
+     if (tryProcessNativeImageUploadPacket(data, sizeBytes))
+         return;
+@@ -1394,6 +1397,13 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+             command.direction = m_trxdir;
+             m_backend->BeginTransfer(command);
+         }
++        if (un4prof::gsCaptureBudget().load(std::memory_order_relaxed) > 0)
++        {
++            un4prof::gsCaptureBudget().fetch_sub(1);
++            std::cerr << "[un4draw] trx dir=" << m_trxdir << std::hex << " dbp=" << m_bitbltbuf.dbp << "/" << int(m_bitbltbuf.dbw)
++                      << "/" << int(m_bitbltbuf.dpsm) << " sbp=" << m_bitbltbuf.sbp << std::dec << " pos=" << m_trxpos.dsax << ","
++                      << m_trxpos.dsay << " tam=" << m_trxreg.rrw << "x" << m_trxreg.rrh << std::endl;
++        }
+         recordTransferDebugEventUnlocked();
+         break;
+     }
+@@ -1578,6 +1588,30 @@ void GS::vertexKick(bool drawing)
+         GSPrimitiveBatch batch = buildDrawBatch(needed);
+         updatePreferredDisplaySourceForDraw(batch);
+         m_backend->Submit(batch);
++        un4prof::gsDraws().fetch_add(1u, std::memory_order_relaxed);
++        if (un4prof::gsCaptureBudget().load(std::memory_order_relaxed) > 0)
++        {
++            un4prof::gsCaptureBudget().fetch_sub(1);
++            const GSContext &c = m_ctx[m_prim.ctxt ? 1 : 0];
++            float x0 = m_vtxQueue[0].x, x1 = x0, y0 = m_vtxQueue[0].y, y1 = y0;
++            for (int i = 1; i < needed && i < kMaxVerts; ++i)
++            {
++                x0 = std::min(x0, m_vtxQueue[i].x); x1 = std::max(x1, m_vtxQueue[i].x);
++                y0 = std::min(y0, m_vtxQueue[i].y); y1 = std::max(y1, m_vtxQueue[i].y);
++            }
++            const GSVertex &v = m_vtxQueue[(needed - 1) % kMaxVerts];
++            std::cerr << "[un4draw] prim=" << int(m_prim.type) << " tme=" << m_prim.tme << " abe=" << m_prim.abe
++                      << " fst=" << m_prim.fst << " ctx=" << m_prim.ctxt << std::hex
++                      << " fb=" << c.frame.fbp << "/" << c.frame.fbw << "/" << int(c.frame.psm) << " msk=" << c.frame.fbmsk
++                      << " tex=" << c.tex0.tbp0 << "/" << int(c.tex0.tbw) << "/" << int(c.tex0.psm) << " tw=" << int(c.tex0.tw)
++                      << " th=" << int(c.tex0.th) << " tcc=" << int(c.tex0.tcc) << " tfx=" << int(c.tex0.tfx)
++                      << " cbp=" << c.tex0.cbp << " alpha=" << c.alpha << " test=" << c.test << std::dec
++                      << " ofs=" << (c.xyoffset.ofx / 16) << "," << (c.xyoffset.ofy / 16)
++                      << " sc=" << c.scissor.x0 << "-" << c.scissor.x1 << "," << c.scissor.y0 << "-" << c.scissor.y1
++                      << " xy=" << int(x0) << "," << int(y0) << "-" << int(x1) << "," << int(y1)
++                      << " rgba=" << int(v.r) << "," << int(v.g) << "," << int(v.b) << "," << int(v.a)
++                      << " pabe=" << m_pabe << std::endl;
++        }
+         recordDrawDebugEventUnlocked(needed);
+     }
+ 
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index 847ced5..646dd7e 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -1,3 +1,4 @@
++#include "un4_profile.h"
+ #include <iostream>
+ // Based on Blackline Interactive implementation
+ #include "runtime/ps2_memory.h"
+@@ -381,6 +382,12 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+         uint16_t imm = cmd & 0xFFFF;
+         uint8_t num = (cmd >> 16) & 0xFF;
+         const bool irq = (cmd & 0x80000000u) != 0u;
++        if (un4prof::vifTraceBudget().load(std::memory_order_relaxed) > 0)
++        {   // UN4Decomp: amostra dos comandos VIF1 de alguns quadros
++            un4prof::vifTraceBudget().fetch_sub(1);
++            std::cerr << "[un4vif] pos=" << (pos - 4u) << "/" << sizeBytes << " cmd=0x" << std::hex << cmd
++                      << " op=0x" << int(opcode) << " num=" << std::dec << int(num) << " imm=" << imm << std::endl;
++        }
+ 
+         // Track most-recent command for VIFn_CODE emulation.
+         vif1_regs.code = cmd;
+diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+index a98b68b..b46e423 100644
+--- a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
++++ b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+@@ -1,4 +1,6 @@
+ #include <iostream>
++#include <string>
++#include <cstring>
+ #include "runtime/ps2_vu1.h"
+ #include "runtime/gs/ps2_gif_arbiter.h"
+ #include "runtime/gs/gs_frontend.h"
+@@ -915,10 +917,226 @@ void VU1Interpreter::progressXgkick()
+     }
+ }
+ 
++// UN4Decomp: copia do estado do VU1 no inicio de cada execucao (para reproduzir fora do jogo)
++namespace
++{
++    struct Un4VuSnap
++    {
++        uint8_t code[16384];
++        uint8_t data[16384];
++        VU1State state;
++        bool resume;
++        uint32_t startPC, top, itop;
++        bool valid = false;
++    };
++    Un4VuSnap &un4Snap()
++    {
++        static Un4VuSnap s;
++        return s;
++    }
++    bool g_un4DumpRequested = false;
++    bool g_un4DumpDone = false;
++
++    void un4DumpSnap()
++    {
++        Un4VuSnap &s = un4Snap();
++        if (!s.valid)
++            return;
++        std::cerr << "[un4vu] inicio " << (s.resume ? "resume" : "execute") << " pc=0x" << std::hex << s.startPC << " top=0x" << s.top
++                  << " itop=0x" << s.itop << std::dec << std::endl;
++        auto dumpMem = [](const char *tag, const uint8_t *mem, uint32_t size)
++        {
++            for (uint32_t off = 0; off < size; off += 16u)
++            {
++                bool zero = true;
++                for (uint32_t i = 0; i < 16u; ++i)
++                    zero = zero && mem[off + i] == 0u;
++                if (zero)
++                    continue;
++                char line[64];
++                std::snprintf(line, sizeof(line), "[un4vu] %s %04x ", tag, off / 16u);
++                std::cerr << line;
++                for (uint32_t i = 0; i < 16u; ++i)
++                {
++                    char hx[4];
++                    std::snprintf(hx, sizeof(hx), "%02x", mem[off + i]);
++                    std::cerr << hx;
++                }
++                std::cerr << '\n';
++            }
++        };
++        dumpMem("c", s.code, sizeof(s.code));
++        dumpMem("d", s.data, sizeof(s.data));
++        const uint8_t *st = reinterpret_cast<const uint8_t *>(&s.state);
++        std::cerr << "[un4vu] s " << sizeof(VU1State) << " ";
++        for (size_t i = 0; i < sizeof(VU1State); ++i)
++        {
++            char hx[4];
++            std::snprintf(hx, sizeof(hx), "%02x", st[i]);
++            std::cerr << hx;
++        }
++        std::cerr << std::endl;
++    }
++
++    void un4TakeSnap(const uint8_t *code, uint32_t codeSize, const uint8_t *data, uint32_t dataSize, const VU1State &state,
++                     bool resume, uint32_t startPC, uint32_t top, uint32_t itop)
++    {
++        if (g_un4DumpDone)
++            return;
++        Un4VuSnap &s = un4Snap();
++        std::memcpy(s.code, code, std::min<uint32_t>(codeSize, sizeof(s.code)));
++        std::memcpy(s.data, data, std::min<uint32_t>(dataSize, sizeof(s.data)));
++        s.state = state;
++        s.resume = resume;
++        s.startPC = startPC;
++        s.top = top;
++        s.itop = itop;
++        s.valid = true;
++    }
++}
++
++// UN4Decomp: resume o pacote GIF que o VU1 mandou (quantas tags, PRIM, vertices XYZ) para ver se ele desenha algo
++static void un4LogXgkickPacket(const uint8_t *data, uint32_t size)
++{
++    static uint64_t s_n = 0;
++    ++s_n;
++    static uint32_t s_lines = 0;
++    const bool un4Print = (s_n <= 80u || ((s_n % 25u) <= 1u && s_lines < 1500u));
++    if (un4Print)
++        ++s_lines;
++    uint32_t off = 0, tags = 0, xyz = 0, prims = 0, ad = 0, adc = 0, colZero = 0, colNonZero = 0;
++    std::string fmts, firstVtx;
++    uint64_t lastPrim = ~0ull;
++    while (off + 16u <= size && tags < 64u)
++    {
++        uint64_t lo = 0, hi = 0;
++        std::memcpy(&lo, data + off, 8);
++        std::memcpy(&hi, data + off + 8, 8);
++        off += 16u;
++        ++tags;
++        const uint32_t nloop = static_cast<uint32_t>(lo & 0x7FFFu);
++        const uint32_t flg = static_cast<uint32_t>((lo >> 58) & 3u);
++        uint32_t nreg = static_cast<uint32_t>((lo >> 60) & 0xFu);
++        if (nreg == 0u)
++            nreg = 16u;
++        const bool eop = ((lo >> 15) & 1u) != 0u;
++        if ((lo >> 46) & 1u)
++        {
++            ++prims;
++            lastPrim = (lo >> 47) & 0x7FFu;
++        }
++        char buf[64];
++        std::snprintf(buf, sizeof(buf), " [f%u n%u r%u regs=%llx%s]", flg, nloop, nreg,
++                      static_cast<unsigned long long>(hi & ((nreg >= 16u) ? ~0ull : ((1ull << (nreg * 4u)) - 1u))), eop ? " eop" : "");
++        fmts += buf;
++        if (flg == 0u)
++        {
++            for (uint32_t l = 0; l < nloop; ++l)
++                for (uint32_t r = 0; r < nreg; ++r)
++                {
++                    if (off + 16u > size)
++                        break;
++                    const uint32_t desc = static_cast<uint32_t>((hi >> (r * 4u)) & 0xFu);
++                    if (desc == 0x1u)
++                    {
++                        uint64_t c0 = 0, c1 = 0;
++                        std::memcpy(&c0, data + off, 8);
++                        std::memcpy(&c1, data + off + 8, 8);
++                        if ((c0 | c1) == 0u)
++                            ++colZero;
++                        else
++                            ++colNonZero;
++                    }
++                    if (desc == 0x1u && firstVtx.size() < 300u)
++                    {
++                        uint64_t clo = 0, chi = 0;
++                        std::memcpy(&clo, data + off, 8);
++                        std::memcpy(&chi, data + off + 8, 8);
++                        char cb[48];
++                        std::snprintf(cb, sizeof(cb), " c(%u,%u,%u,%u)", static_cast<unsigned>(clo & 0xFFu),
++                                      static_cast<unsigned>((clo >> 32) & 0xFFu), static_cast<unsigned>(chi & 0xFFu),
++                                      static_cast<unsigned>((chi >> 32) & 0xFFu));
++                        firstVtx += cb;
++                    }
++                    if (desc == 0x4u || desc == 0x5u || desc == 0xCu || desc == 0xDu)
++                    {
++                        ++xyz;
++                        uint64_t vlo = 0, vhi = 0;
++                        std::memcpy(&vlo, data + off, 8);
++                        std::memcpy(&vhi, data + off + 8, 8);
++                        const bool vadc = ((vhi >> 47) & 1u) != 0u;
++                        if (vadc)
++                            ++adc;
++                        if (firstVtx.size() < 300u)
++                        {
++                            char vb[96];
++                            std::snprintf(vb, sizeof(vb), " v(x=%.1f y=%.1f z=%llx adc=%d)",
++                                          static_cast<double>(vlo & 0xFFFFu) / 16.0,
++                                          static_cast<double>((vlo >> 32) & 0xFFFFu) / 16.0,
++                                          static_cast<unsigned long long>(vhi & 0xFFFFFFFFull), vadc ? 1 : 0);
++                            firstVtx += vb;
++                        }
++                    }
++                    else if (desc == 0x0u)
++                        ++prims;
++                    else if (desc == 0xEu)
++                    {
++                        uint64_t v = 0, a = 0;
++                        std::memcpy(&v, data + off, 8);
++                        std::memcpy(&a, data + off + 8, 8);
++                        ++ad;
++                        const uint32_t reg = static_cast<uint32_t>(a & 0xFFu);
++                        if (reg == 0x00u) { ++prims; lastPrim = v & 0x7FFu; }
++                        if (reg == 0x04u || reg == 0x05u || reg == 0x0Cu || reg == 0x0Du)
++                            ++xyz;
++                    }
++                    off += 16u;
++                }
++        }
++        else if (flg == 1u)
++        {
++            const uint64_t words = static_cast<uint64_t>(nloop) * nreg;
++            for (uint64_t w = 0; w < words; ++w)
++            {
++                const uint32_t desc = static_cast<uint32_t>((hi >> ((w % nreg) * 4u)) & 0xFu);
++                if (desc == 0x4u || desc == 0x5u || desc == 0xCu || desc == 0xDu)
++                    ++xyz;
++                else if (desc == 0x0u)
++                    ++prims;
++            }
++            off += static_cast<uint32_t>(((words + 1u) & ~1ull) * 8u);
++        }
++        else
++            off += nloop * 16u;
++        if (eop)
++            break;
++    }
++    if (colZero > 0u && colNonZero > 0u && !g_un4DumpDone)
++    {
++        std::cerr << "[un4xg] pacote com cores misturadas #" << s_n << " zero=" << colZero << " cor=" << colNonZero
++                  << " -> registrando o estado do VU1" << std::endl;
++        un4DumpSnap();
++        g_un4DumpDone = true;
++    }
++    if (!un4Print)
++        return;
++    std::cerr << "[un4xg] #" << s_n << " bytes=" << size << " tags=" << tags << " prims=" << prims << " ultimoPrim=0x" << std::hex
++              << lastPrim << std::dec << " xyz=" << xyz << " adc=" << adc << " ad=" << ad << fmts.substr(0, 400) << firstVtx;
++    std::cerr << " qw0-2:";
++    for (uint32_t i = 0; i < 48u && i < size; i += 8u)
++    {
++        uint64_t v = 0;
++        std::memcpy(&v, data + i, 8);
++        std::cerr << ' ' << std::hex << v << std::dec;
++    }
++    std::cerr << std::endl;
++}
++
+ void VU1Interpreter::finishXgkick()
+ {
+     if (!m_xgkick.active)
+         return;
++    un4LogXgkickPacket(m_xgkick.packet.data(), m_xgkick.totalBytes);
+ 
+     if (m_activeMemory)
+         m_activeMemory->submitGifPacket(GifPathId::Path1, m_xgkick.packet.data(), m_xgkick.totalBytes);
+@@ -1610,6 +1828,8 @@ void VU1Interpreter::execute(uint8_t *vuCode, uint32_t codeSize,
+     m_state.vf[0][1] = 0.0f;
+     m_state.vf[0][2] = 0.0f;
+     m_state.vf[0][3] = 1.0f;
++    if (m_unit == Unit::VU1)
++        un4TakeSnap(vuCode, codeSize, vuData, dataSize, m_state, false, startPC, top, itop);
+     run(vuCode, codeSize, vuData, dataSize, gs, memory, maxCycles);
+ }
+ 
+@@ -1622,6 +1842,8 @@ void VU1Interpreter::resume(uint8_t *vuCode, uint32_t codeSize,
+     m_state.itop = itop;
+     m_state.stoppedByD = false;
+     m_state.stoppedByT = false;
++    if (m_unit == Unit::VU1)
++        un4TakeSnap(vuCode, codeSize, vuData, dataSize, m_state, true, m_state.pc, top, itop);
+     run(vuCode, codeSize, vuData, dataSize, gs, memory, maxCycles);
+ }
+ 

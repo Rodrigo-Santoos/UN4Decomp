@@ -1,0 +1,88 @@
+diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp b/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp
+index 6974254..9043159 100644
+--- a/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp
++++ b/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp
+@@ -18,6 +18,23 @@ namespace
+     }
+ }
+ 
++namespace
++{
++    // UN4Decomp: no VU do PS2, MAX/MINI comparam os bits do numero como inteiros (sinal e modulo) e
++    // NAO zeram numeros "denormais". Os jogos usam "MAX vfA, vfB, vfB" para copiar cores e outros
++    // valores inteiros (0x80 = 128 como inteiro e um denormal como float). Com a normalizacao, a cor
++    // virava 0 e quase tudo que o VU1 desenhava ficava preto/transparente (titulo e menu do UN4).
++    inline int64_t un4MinMaxKey(float value)
++    {
++        uint32_t bits = 0;
++        std::memcpy(&bits, &value, sizeof(bits));
++        const int64_t magnitude = static_cast<int64_t>(bits & 0x7FFFFFFFu);
++        return (bits & 0x80000000u) ? -magnitude : magnitude;
++    }
++    inline float un4Max(float a, float b) { return (un4MinMaxKey(a) > un4MinMaxKey(b)) ? a : b; }
++    inline float un4Min(float a, float b) { return (un4MinMaxKey(a) < un4MinMaxKey(b)) ? a : b; }
++}
++
+ // ============================================================================
+ // Upper instructions (FMAC pipeline)
+ // ============================================================================
+@@ -99,9 +116,9 @@ void VU1Interpreter::execUpper(uint32_t instr)
+     case 0x12:
+     case 0x13: // MAXbc
+     {
+-        float bc = broadcast(vt, op & 3);
++        const float bc = m_state.vf[ft][op & 3];
+         for (int c = 0; c < 4; c++)
+-            result[c] = (vs[c] > bc) ? vs[c] : bc;
++            result[c] = un4Max(m_state.vf[fs][c], bc);
+         applyDest(vd, result, dest);
+         return;
+     }
+@@ -110,9 +127,9 @@ void VU1Interpreter::execUpper(uint32_t instr)
+     case 0x16:
+     case 0x17: // MINIbc
+     {
+-        float bc = broadcast(vt, op & 3);
++        const float bc = m_state.vf[ft][op & 3];
+         for (int c = 0; c < 4; c++)
+-            result[c] = (vs[c] < bc) ? vs[c] : bc;
++            result[c] = un4Min(m_state.vf[fs][c], bc);
+         applyDest(vd, result, dest);
+         return;
+     }
+@@ -134,7 +151,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+         return;
+     case 0x1D: // MAXi
+         for (int c = 0; c < 4; c++)
+-            result[c] = (vs[c] > i) ? vs[c] : i;
++            result[c] = un4Max(m_state.vf[fs][c], m_state.i);
+         applyDest(vd, result, dest);
+         return;
+     case 0x1E: // MULi
+@@ -144,7 +161,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+         return;
+     case 0x1F: // MINIi
+         for (int c = 0; c < 4; c++)
+-            result[c] = (vs[c] < i) ? vs[c] : i;
++            result[c] = un4Min(m_state.vf[fs][c], m_state.i);
+         applyDest(vd, result, dest);
+         return;
+     case 0x20: // ADDq
+@@ -204,7 +221,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+         return;
+     case 0x2B: // MAX
+         for (int c = 0; c < 4; c++)
+-            result[c] = (vs[c] > vt[c]) ? vs[c] : vt[c];
++            result[c] = un4Max(m_state.vf[fs][c], m_state.vf[ft][c]);
+         applyDest(vd, result, dest);
+         return;
+     case 0x2C: // SUB
+@@ -226,7 +243,7 @@ void VU1Interpreter::execUpper(uint32_t instr)
+         return;
+     case 0x2F: // MINI
+         for (int c = 0; c < 4; c++)
+-            result[c] = (vs[c] < vt[c]) ? vs[c] : vt[c];
++            result[c] = un4Min(m_state.vf[fs][c], m_state.vf[ft][c]);
+         applyDest(vd, result, dest);
+         return;
+ 

@@ -1,0 +1,28 @@
+--- a/ps2xRecomp/src/lib/fpu_translator.cpp
++++ b/ps2xRecomp/src/lib/fpu_translator.cpp
+@@ -58,7 +58,9 @@
+                                    "ctx->f[{}] = FPU_DIV_S(ctx->f[{}], ctx->f[{}]); }}",
+                                    ft, fd, fs, ft);
+             case COP1_S_SQRT:
+-                return fmt::format("ctx->f[{}] = FPU_SQRT_S(ctx->f[{}]);", fd, fs);
++                // UN4Decomp: no R5900 o SQRT.S tira a raiz de ft (o campo fs fica zerado). Usando fs, toda raiz
++                // quadrada do jogo saia como raiz de f0.
++                return fmt::format("ctx->f[{}] = FPU_SQRT_S(ctx->f[{}]);", fd, ft);
+             case COP1_S_ABS:
+                 return fmt::format("ctx->f[{}] = FPU_ABS_S(ctx->f[{}]);", fd, fs);
+             case COP1_S_MOV:
+@@ -74,7 +76,13 @@
+             case COP1_S_FLOOR_W:
+                 return fmt::format("{{ int32_t tmp = FPU_FLOOR_W_S(ctx->f[{}]); std::memcpy(&ctx->f[{}], &tmp, sizeof(tmp)); }}", fs, fd);
+             case COP1_S_CVT_W:
+-                return fmt::format("{{ int32_t tmp = FPU_CVT_W_S(ctx->f[{}]); std::memcpy(&ctx->f[{}], &tmp, sizeof(tmp)); }}", fs, fd);
++                // UN4Decomp: no R5900 o CVT.W.S sempre corta as casas decimais (arredonda para zero) e satura em
++                // +-2^31. O runtime arredondava para o inteiro mais proximo (2.7 virava 3).
++                return fmt::format("{{ uint32_t bits; std::memcpy(&bits, &ctx->f[{0}], sizeof(bits)); "
++                                   "int32_t tmp = ((bits & 0x7F800000u) <= 0x4E800000u) ? (int32_t)ctx->f[{0}] "
++                                   ": ((bits & 0x80000000u) ? (int32_t)0x80000000 : 0x7FFFFFFF); "
++                                   "std::memcpy(&ctx->f[{1}], &tmp, sizeof(tmp)); }}",
++                                   fs, fd);
+             case COP1_S_RSQRT:
+                 // RSQRT.S fd, fs, ft computes fs / sqrt(ft), not 1 / sqrt(fs).
+                 return fmt::format("ctx->f[{}] = FPU_RSQRT_S(ctx->f[{}], ctx->f[{}]);", fd, fs, ft);

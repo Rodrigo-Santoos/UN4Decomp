@@ -1,0 +1,40 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
+index 7aee137..c5f5cc0 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/GS.cpp
+@@ -944,10 +944,13 @@ namespace ps2_stubs
+         uint32_t psm = getRegU32(ctx, 5);
+         uint32_t w = getRegU32(ctx, 6);
+         uint32_t h = getRegU32(ctx, 7);
+-        const uint32_t ztest = readStackU32(rdram, ctx, 16);
+-        const uint32_t zpsm = readStackU32(rdram, ctx, 20);
+-        const uint32_t clear = readStackU32(rdram, ctx, 24);
+-        (void)clear;
++        // UN4Decomp: na EABI do EE o 5o, 6o e 7o argumentos vem em t0, t1, t2 (nao na pilha).
++        // Lendo da pilha, ztest/zpsm/clear vinham lixo (0): o Z ficava mascarado e o pacote de limpeza
++        // (clear0) nao era montado. O UN4 copia o clear0 para dentro do proprio pacote de copia do quadro
++        // (func_00107B90) e e ele que zera a cor e o Z a cada frame.
++        const uint32_t ztest = static_cast<uint32_t>(static_cast<int16_t>(getRegU32(ctx, 8) & 0xFFFFu));
++        const uint32_t zpsm = static_cast<uint32_t>(static_cast<int16_t>(getRegU32(ctx, 9) & 0xFFFFu));
++        const uint32_t clear = static_cast<uint32_t>(static_cast<int16_t>(getRegU32(ctx, 10) & 0xFFFFu));
+ 
+         if (w == 0u)
+         {
+@@ -984,10 +987,16 @@ namespace ps2_stubs
+         db.disp[0].bgcolor = 0u;
+         db.disp[1] = db.disp[0];
+ 
+-        db.giftag0 = {makeGiftagAplusD(14u), 0x0E0E0E0E0E0E0E0EULL};
++        db.giftag0 = {makeGiftagAplusD(clear != 0u ? 14u : 8u), 0x0E0E0E0E0E0E0E0EULL};
+         seedGsDrawEnv1(db.draw0, drawWidth, drawHeight, 0u, fbw, psm, zbufAddr, zpsm, ztest, false);
+         db.giftag1 = db.giftag0;
+         seedGsDrawEnv1(db.draw1, drawWidth, drawHeight, 0u, fbw, psm, zbufAddr, zpsm, ztest, false);
++        if (clear != 0u)
++        {
++            // as duas telas do sceGsDBuff usam o contexto 1
++            seedGsClearPacket(db.clear0, drawWidth, drawHeight, 0u, ztest, false);
++            seedGsClearPacket(db.clear1, drawWidth, drawHeight, 0u, ztest, false);
++        }
+ 
+         if (!writeGsDBuff(rdram, envAddr, db))
+         {

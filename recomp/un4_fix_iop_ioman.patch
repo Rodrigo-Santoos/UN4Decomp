@@ -1,0 +1,298 @@
+diff --git a/ps2xIOP/src/emulator/imports/iop_cdvd.h b/ps2xIOP/src/emulator/imports/iop_cdvd.h
+--- a/ps2xIOP/src/emulator/imports/iop_cdvd.h
++++ b/ps2xIOP/src/emulator/imports/iop_cdvd.h
+@@ -1,8 +1,10 @@
+ #pragma once
+ 
++#include <cstddef>
+ #include <cstdint>
+ #include <memory>
+ #include <optional>
++#include <string>
+ 
+ namespace ps2x::iop
+ {
+@@ -36,6 +38,10 @@
+         [[nodiscard]] bool dispatchImport(uint16_t ordinal, IopCpuState &cpu);
+         [[nodiscard]] std::optional<CompletionCallback> takeCompletionCallback() noexcept;
+ 
++        // UN4Decomp: acesso aos arquivos do disco para o ioman (open/read de "cdrom0:\\...")
++        [[nodiscard]] bool un4LookupFile(const std::string &path, uint32_t &lsn, uint32_t &size);
++        [[nodiscard]] bool un4ReadBytes(uint32_t lsn, uint64_t offset, void *destination, size_t size);
++
+     private:
+         class Impl;
+         std::unique_ptr<Impl> m_impl;
+diff --git a/ps2xIOP/src/emulator/imports/iop_cdvd.cpp b/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
+--- a/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
++++ b/ps2xIOP/src/emulator/imports/iop_cdvd.cpp
+@@ -596,6 +596,56 @@
+         }
+ 
+         // UN4Decomp: com imagem ISO configurada, procura no diretorio real da imagem (LBNs reais).
++    public:
++        // UN4Decomp: arquivo do disco para o ioman. Procura na imagem ISO (ou no diretorio virtual).
++        bool un4LookupFile(const std::string &path, uint32_t &lsnOut, uint32_t &sizeOut)
++        {
++            bool directory = false;
++            if (imageLookup(path, lsnOut, sizeOut, directory))
++                return !directory;
++            IsoNode *node = findVirtualIsoNode(path);
++            if (!node || node->directory)
++                return false;
++            lsnOut = node->lsn;
++            sizeOut = node->size;
++            return true;
++        }
++
++        // UN4Decomp: le bytes a partir do setor lsn + offset (qualquer alinhamento)
++        bool un4ReadBytes(uint32_t lsn, uint64_t offset, uint8_t *dst, size_t size)
++        {
++            if (size == 0u)
++                return true;
++            const uint64_t start = static_cast<uint64_t>(lsn) * kSectorSize + offset;
++            const std::string imagePath = host.hostPath(HostPathKind::CdImage);
++            if (!imagePath.empty())
++            {
++                if (imageHandle == 0u)
++                    imageHandle = host.openHostFile(imagePath);
++                size_t bytesRead = 0u;
++                if (imageHandle != 0u && host.readHostFile(imageHandle, start, dst, size, bytesRead) && bytesRead == size)
++                    return true;
++            }
++            if (!buildVirtualIso())
++                return false;
++            std::array<uint8_t, kSectorSize> sector{};
++            uint64_t position = start;
++            size_t done = 0u;
++            while (done < size)
++            {
++                const uint32_t sectorLsn = static_cast<uint32_t>(position / kSectorSize);
++                const size_t within = static_cast<size_t>(position % kSectorSize);
++                const size_t count = std::min<size_t>(size - done, kSectorSize - within);
++                if (!readVirtualSector(sectorLsn, sector.data()))
++                    return false;
++                std::memcpy(dst + done, sector.data() + within, count);
++                done += count;
++                position += count;
++            }
++            return true;
++        }
++
++    private:
+         bool readImageSector(uint32_t lba, uint8_t *dst)
+         {
+             const std::string imagePath = host.hostPath(HostPathKind::CdImage);
+@@ -872,4 +922,14 @@
+     {
+         return m_impl->takeCompletionCallback();
+     }
++
++    bool IopCdvd::un4LookupFile(const std::string &path, uint32_t &lsn, uint32_t &size)
++    {
++        return m_impl->un4LookupFile(path, lsn, size);
++    }
++
++    bool IopCdvd::un4ReadBytes(uint32_t lsn, uint64_t offset, void *destination, size_t size)
++    {
++        return m_impl->un4ReadBytes(lsn, offset, static_cast<uint8_t *>(destination), size);
++    }
+ }
+diff --git a/ps2xIOP/src/emulator/imports/iop_ioman.h b/ps2xIOP/src/emulator/imports/iop_ioman.h
+--- a/ps2xIOP/src/emulator/imports/iop_ioman.h
++++ b/ps2xIOP/src/emulator/imports/iop_ioman.h
+@@ -7,13 +7,14 @@
+ namespace ps2x::iop::detail
+ {
+     struct IopCpuState;
++    class IopCdvd;
+     class IopGuestExecutor;
+     class IopMemory;
+ 
+     class IopIoman
+     {
+     public:
+-        explicit IopIoman(IopMemory &memory) noexcept;
++        IopIoman(IopMemory &memory, IopCdvd &cdvd) noexcept;
+ 
+         void reset();
+         [[nodiscard]] bool dispatchImport(uint16_t ordinal, IopCpuState &cpu, IopGuestExecutor &executor);
+@@ -26,7 +27,21 @@
+             std::string name;
+         };
+ 
++        // UN4Decomp: arquivos do disco abertos pelo ioman (o SNDBASE carrega os bancos de som assim)
++        struct CdFile
++        {
++            bool used = false;
++            uint32_t lsn = 0u;
++            uint32_t size = 0u;
++            uint64_t position = 0u;
++            std::string path;
++        };
++
++        bool un4DispatchCdFile(uint16_t ordinal, IopCpuState &cpu);
++
+         IopMemory &m_memory;
++        IopCdvd &m_cdvd;
+         std::vector<Device> m_devices;
++        std::vector<CdFile> m_cdFiles;
+     };
+ }
+diff --git a/ps2xIOP/src/emulator/imports/iop_ioman.cpp b/ps2xIOP/src/emulator/imports/iop_ioman.cpp
+--- a/ps2xIOP/src/emulator/imports/iop_ioman.cpp
++++ b/ps2xIOP/src/emulator/imports/iop_ioman.cpp
+@@ -1,21 +1,129 @@
+ #include "iop_ioman.h"
+ 
++#include "iop_cdvd.h"
+ #include "../core/iop_cpu.h"
+ #include "../core/iop_memory.h"
+ #include "../services/iop_rpc.h"
+ 
+ #include <algorithm>
++#include <cctype>
++#include <cstdio>
+ 
+ namespace ps2x::iop::detail
+ {
+-    IopIoman::IopIoman(IopMemory &memory) noexcept
+-        : m_memory(memory)
++    IopIoman::IopIoman(IopMemory &memory, IopCdvd &cdvd) noexcept
++        : m_memory(memory), m_cdvd(cdvd)
+     {
+     }
+ 
+     void IopIoman::reset()
+     {
+         m_devices.clear();
++        m_cdFiles.clear();
++    }
++
++    // UN4Decomp: open/close/read/lseek de arquivos "cdrom0:" (ioman 4/5/6/8), lidos da imagem do disco.
++    // O SNDBASE.IRX do UN4 carrega os bancos de som (DATA\SNDDATA.BIN) assim. Antes essas chamadas nao
++    // existiam: o read devolvia 0 e o SNDBASE repetia a leitura para sempre ("file read error!"), e o
++    // jogo ficava preso numa tela preta esperando o som carregar.
++    bool IopIoman::un4DispatchCdFile(uint16_t ordinal, IopCpuState &cpu)
++    {
++        constexpr uint32_t kErrNoEnt = static_cast<uint32_t>(-2);
++        constexpr uint32_t kErrIo = static_cast<uint32_t>(-5);
++        constexpr uint32_t kErrInval = static_cast<uint32_t>(-22);
++        const uint32_t a0 = cpu.gpr[4];
++        const uint32_t a1 = cpu.gpr[5];
++        const uint32_t a2 = cpu.gpr[6];
++        const auto fileFor = [&](uint32_t fd) -> CdFile *
++        {
++            return (fd < m_cdFiles.size() && m_cdFiles[fd].used) ? &m_cdFiles[fd] : nullptr;
++        };
++
++        switch (ordinal)
++        {
++        case 4: // open(name, mode)
++        {
++            const std::string name = m_memory.readString(a0, 256u);
++            std::string device = name.substr(0u, name.find(':'));
++            std::transform(device.begin(), device.end(), device.begin(),
++                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
++            if (name.find(':') == std::string::npos || (device != "cdrom0" && device != "cdrom"))
++                return false;
++            uint32_t lsn = 0u, size = 0u;
++            if ((a1 & 3u) != 1u || !m_cdvd.un4LookupFile(name, lsn, size))
++            {
++                std::fprintf(stderr, "[un4ioman] open %s modo=0x%x -> nao encontrado\n", name.c_str(), a1);
++                cpu.gpr[2] = kErrNoEnt;
++                return true;
++            }
++            size_t fd = 0u;
++            while (fd < m_cdFiles.size() && m_cdFiles[fd].used)
++                ++fd;
++            if (fd == m_cdFiles.size())
++                m_cdFiles.emplace_back();
++            m_cdFiles[fd] = CdFile{true, lsn, size, 0u, name};
++            std::fprintf(stderr, "[un4ioman] open %s -> fd %zu (lsn=0x%x tamanho=0x%x)\n", name.c_str(), fd, lsn, size);
++            cpu.gpr[2] = static_cast<uint32_t>(fd);
++            return true;
++        }
++        case 5: // close(fd)
++        {
++            CdFile *file = fileFor(a0);
++            if (!file)
++                return false;
++            file->used = false;
++            // o SNDBASE so aceita o close quando ele devolve o proprio fd (no PS2 o primeiro fd e 0)
++            cpu.gpr[2] = a0;
++            return true;
++        }
++        case 6: // read(fd, buffer, size)
++        {
++            CdFile *file = fileFor(a0);
++            if (!file)
++                return false;
++            const uint64_t left = file->position < file->size ? file->size - file->position : 0u;
++            const size_t count = static_cast<size_t>(std::min<uint64_t>(a2, left));
++            std::vector<uint8_t> bytes(count);
++            if (!m_cdvd.un4ReadBytes(file->lsn, file->position, bytes.data(), count) ||
++                (count != 0u && !m_memory.writeRam(a1, bytes.data(), count)))
++            {
++                std::fprintf(stderr, "[un4ioman] read FALHOU %s pos=0x%llx tamanho=0x%zx destino=0x%x\n", file->path.c_str(),
++                             static_cast<unsigned long long>(file->position), count, a1);
++                cpu.gpr[2] = kErrIo;
++                return true;
++            }
++            file->position += count;
++            cpu.gpr[2] = static_cast<uint32_t>(count);
++            return true;
++        }
++        case 8: // lseek(fd, offset, whence)
++        {
++            CdFile *file = fileFor(a0);
++            if (!file)
++                return false;
++            int64_t base = 0;
++            if (a2 == 1u)
++                base = static_cast<int64_t>(file->position);
++            else if (a2 == 2u)
++                base = static_cast<int64_t>(file->size);
++            else if (a2 != 0u)
++            {
++                cpu.gpr[2] = kErrInval;
++                return true;
++            }
++            const int64_t target = base + static_cast<int32_t>(a1);
++            if (target < 0)
++            {
++                cpu.gpr[2] = kErrInval;
++                return true;
++            }
++            file->position = static_cast<uint64_t>(target);
++            cpu.gpr[2] = static_cast<uint32_t>(target);
++            return true;
++        }
++        default:
++            return false;
++        }
+     }
+ 
+     bool IopIoman::dispatchImport(uint16_t ordinal, IopCpuState &cpu, IopGuestExecutor &executor)
+@@ -27,6 +135,9 @@
+             cpu.gpr[2] = value;
+         };
+ 
++        if (un4DispatchCdFile(ordinal, cpu))
++            return true;
++
+         switch (ordinal)
+         {
+         case 20: // AddDrv
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -105,7 +105,7 @@
+               heaplib(memory),
+               intrman(memory),
+               timrman(),
+-              ioman(memory),
++              ioman(memory, cdvd),
+               cpuCore(memory),
+               imports(memory),
+               loadcore(memory, imports)

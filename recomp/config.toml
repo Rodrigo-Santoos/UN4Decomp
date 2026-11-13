@@ -1,0 +1,2630 @@
+# PS2Recomp configuration for: SLUS_218.62
+# Gerado pelo ps2_analyzer do PS2Recomp e ajustado para o UN4Decomp
+# (os limites das funcoes vem do splat: build/funcs.csv, gerado por tools/make_recomp_csv.py)
+
+[general]
+# Path to input ELF file
+input = "game/SLUS_218.62"
+
+# Path to Ghidra exported function map (optional CSV)
+ghidra_output = "build/funcs.csv"
+
+# Path to output directory
+output = "build/output/"
+
+# Single file output mode (recommended for large games)
+single_file_output = false
+
+# Patch policy (instruction-driven handling is preferred for syscalls)
+patch_syscalls = false
+patch_cop0 = true
+patch_cache = true
+
+# Functions to stub (only names with runtime syscall/stub handlers)
+stubs = [
+  # UN4: a versao "Layer" (DVD de duas camadas) cai no handler normal do runtime; o 3o argumento (camada) e ignorado
+  "sceCdSearchFile@0x00178EE0",
+  "sceGsResetGraph@0x00154508",
+  "sceGsResetPath@0x001546A8",
+  "sceGsSetDefDispEnv@0x001547C0",
+  "sceGsPutDispEnv@0x00154B38",
+  "sceGszbufaddr@0x00154BF8",
+  "sceGsSetDefDrawEnv@0x00154CC0",
+  "sceGsSetDefClear@0x00154EA8",
+  "sceGsPutDrawEnv@0x00154FB0",
+  "sceGsSetDefDBuff@0x00155098",
+  "sceGsSwapDBuff@0x00155330",
+  "sceGsSyncV@0x00155390",
+  "sceGsSyncPath@0x00155428",
+  "sceGsSetDefLoadImage@0x00155740",
+  "sceGsSetDefStoreImage@0x00155928",
+  "sceGsExecLoadImage@0x00155A68",
+  "sceGsExecStoreImage@0x00155BE8",
+  "sceGsSyncVCallback@0x00156278",
+  "memclr@0x001564C0",
+  "sceDmaGetChan@0x001564F8",
+  "sceDmaReset@0x00156520",
+  "sceDmaPutEnv@0x00156600",
+  "sceDmaGetEnv@0x001567D8",
+  "sceDmaSend@0x00156828",
+  "sceDmaSendN@0x00156890",
+  "sceDmaSendI@0x00156908",
+  "sceDmaRecv@0x00156980",
+  "sceDmaRecvN@0x001569C8",
+  "sceDmaRecvI@0x00156A48",
+  "sceDmaSync@0x00156AC8",
+  "sceDmaWatch@0x00156B00",
+  "sceDmaPause@0x00156B38",
+  "sceDevVif0Reset@0x001575D8",
+  "sceVpu0Reset@0x001593B8",
+  "sceMpegCreate@0x0015E2D8",
+  "sceMpegInit@0x0015EE80",
+  "sceMpegAddBs@0x0015EF38",
+  "sceMpegGetPicture@0x0015EF78",
+  "sceMpegGetPictureRAW8@0x0015EFC0",
+  "sceMpegReset@0x0015F018",
+  "sceMpegGetDecodeMode@0x0015F0D0",
+  "sceMpegAddCallback@0x0015F0F0",
+  "sceMpegClearRefBuff@0x0015F2A8",
+  "sceMpegGetPictureRAW8xy@0x0015F300",
+  "_sceMpegFlush@0x0015FF48",
+  "sceMpegDemuxPssRing@0x00163170",
+  "sceMpegAddStrCallback@0x00163570",
+  "sceIpuStopDMA@0x00163A48",
+  "sceIpuRestartDMA@0x00163B30",
+  "sceIpuSync@0x00163C80",
+  "sceIpuInit@0x00163D60",
+  "write@0x001649A8",
+  "read@0x00164A28",
+  "_sceSDC@0x00164C30",
+  "_sceIDC@0x00164D70",
+  "InitThread@0x001651B8",
+  "iWakeupThread@0x001652A8",
+  "iRotateThreadReadyQueue@0x00165340",
+  "StartThread@0x00165520",
+  "sceDeci2Open@0x001656C0",
+  "sceDeci2Close@0x00165708",
+  "sceDeci2ReqSend@0x00165730",
+  "sceDeci2Poll@0x00165760",
+  "sceDeci2ExRecv@0x001657E0",
+  "sceDeci2ExSend@0x00165818",
+  "sceDeci2ExReqSend@0x00165850",
+  "sceDeci2ExLock@0x00165880",
+  "sceDeci2ExUnLock@0x001658A8",
+  "sceTtyHandler@0x001659A0",
+  "sceTtyWrite@0x00165B38",
+  "sceTtyRead@0x00165CB0",
+  "sceTtyInit@0x00165D80",
+  "sceSifSetDma@0x00167308",
+  "isceSifSetDma@0x00167390",
+  "sceSifInitCmd@0x001673C8",
+  "sceSifExitCmd@0x00167648",
+  "sceSifAddCmdHandler@0x001676B0",
+  "sceSifRemoveCmdHandler@0x00167728",
+  "_sceSifSendCmd@0x00167778",
+  "sceSifSendCmd@0x001678B0",
+  "_sceSifCmdIntrHdlr@0x00167930",
+  "sceSifWriteBackDCache@0x00167A78",
+  "sceSifInitRpc@0x00167B28",
+  "_sceRpcGetFPacket@0x00167DB8",
+  "_sceRpcGetFPacket2@0x00167DE8",
+  "sceSifGetOtherData@0x00168008",
+  "sceSifBindRpc@0x001682D0",
+  "sceSifCallRpc@0x001684B0",
+  "sceSifCheckStatRpc@0x001686B0",
+  "sceSifSetRpcQueue@0x001686F0",
+  "sceSifRegisterRpc@0x00168788",
+  "sceSifRemoveRpc@0x00168858",
+  "sceSifRemoveRpcQueue@0x001688F0",
+  "sceSifGetNextRequest@0x00168980",
+  "sceSifExecRequest@0x001689D8",
+  "sceSifRpcLoop@0x00168BA0",
+  "_sceFsSemInit@0x00169270",
+  "sceFsInit@0x001693F0",
+  "sceFsReset@0x00169688",
+  "sceOpen@0x001698F0",
+  "sceClose@0x00169B80",
+  "sceLseek@0x00169CF8",
+  "sceRead@0x00169F38",
+  "sceWrite@0x0016A1A8",
+  "sceIoctl@0x0016A468",
+  "sceSifInitIopHeap@0x0016C818",
+  "sceSifAllocIopHeap@0x0016C8A0",
+  "sceSifAllocSysMemory@0x0016C910",
+  "sceSifFreeIopHeap@0x0016C990",
+  "sceSifFreeSysMemory@0x0016CA08",
+  "sceSifLoadIopHeap@0x0016CA28",
+  "sceSifLoadFileReset@0x0016CEF8",
+  "_sceSifLoadModuleBuffer@0x0016CF30",
+  "_sceSifLoadModule@0x0016D540",
+  "_sceSifLoadElfPart@0x0016D7A8",
+  "sceSifLoadElf@0x0016D8D0",
+  "sceSifGetIopAddr@0x0016D8F8",
+  "sceSifSetIopAddr@0x0016D9E8",
+  "sceSifResetIop@0x0016DAC8",
+  "sceSifIsAliveIop@0x0016DC20",
+  "sceSifSyncIop@0x0016DC48",
+  "sceSifRebootIop@0x0016DC98",
+  "InitTLB@0x0016E080",
+  "InitAlarm@0x0016EDB8",
+  "sceSdRemoteInit@0x001708B0",
+  "sceSdTransToIOP@0x00170960",
+  "sceSdRemote@0x00170A08",
+  "__ieee754_rem_pio2f@0x00172770",
+  "__kernel_cosf@0x00173C50",
+  "__kernel_sinf@0x00174608",
+  "atan@0x00174998",
+  "cos@0x00174EA8",
+  "fabs@0x00174FD0",
+  "floor@0x00175008",
+  "sin@0x00175490",
+  "__divdi3@0x00175E48",
+  "sceCdCallback@0x001788D8",
+  "sceCdInitEeCB@0x00178AB0",
+  "sceCdNcmdDiskReady@0x00179358",
+  "sceCdSync@0x001793F0",
+  "sceCdSyncS@0x00179490",
+  "sceCdInit@0x00179708",
+  "sceCdDiskReady@0x00179C08",
+  "sceCdRead@0x00179E28",
+  "sceCdSeek@0x0017A008",
+  "sceCdGetDiskType@0x0017A170",
+  "sceCdGetError@0x0017A198",
+  "sceCdStatus@0x0017A230",
+  "sceCdBreak@0x0017A2E8",
+  "sceCdMmode@0x0017A3A0",
+  "sceCdReadClock@0x0017A498",
+  "sceCdStInit@0x0017A558",
+  "sceCdStStart@0x0017A588",
+  "sceCdStSeekF@0x0017A5C0",
+  "sceCdStSeek@0x0017A5F0",
+  "sceCdStStop@0x0017A620",
+  "sceCdStRead@0x0017A658",
+  "sceCdStPause@0x0017A7E0",
+  "sceCdStResume@0x0017A830",
+  "sceCdStStat@0x0017A888",
+  "sceCdStream@0x0017A8D0",
+  "scePadInit@0x0017AA38",
+  "scePadInit2@0x0017ABD0",
+  "scePadEnd@0x0017ACC8",
+  "scePadPortOpen@0x0017AE90",
+  "scePadPortClose@0x0017B078",
+  "scePadGetDmaStr@0x0017B130",
+  "scePadGetFrameCount@0x0017B288",
+  "scePadRead@0x0017B2E0",
+  "scePadGetState@0x0017B358",
+  "scePadStateIntToStr@0x0017B3D0",
+  "scePadSetReqState@0x0017B408",
+  "scePadGetReqState@0x0017B4C0",
+  "scePadInfoAct@0x0017B550",
+  "scePadInfoComb@0x0017B668",
+  "scePadInfoMode@0x0017B780",
+  "scePadSetMainMode@0x0017B8B8",
+  "scePadSetActDirect@0x0017B970",
+  "scePadSetActAlign@0x0017BA38",
+  "scePadGetButtonMask@0x0017BB10",
+  "scePadSetButtonInfo@0x0017BBC0",
+  "scePadInfoPressMode@0x0017BC70",
+  "scePadEnterPressMode@0x0017BCF0",
+  "scePadExitPressMode@0x0017BD48",
+  "scePadSetVrefParam@0x0017BDA0",
+  "scePadGetPortMax@0x0017BE70",
+  "scePadGetSlotMax@0x0017BED8",
+  "scePadGetModVersion@0x0017BF40",
+  "scePadSetWarningLevel@0x0017BFA8",
+  "sceMcInit@0x0017C168",
+  "sceMcEnd@0x0017C400",
+  "sceMcChangeThreadPriority@0x0017C4C0",
+  "sceMcGetSlotMax@0x0017C580",
+  "sceMcOpen@0x0017C640",
+  "sceMcMkdir@0x0017C768",
+  "sceMcClose@0x0017C7A0",
+  "sceMcSeek@0x0017C860",
+  "mceIntrReadFixAlign@0x0017C940",
+  "sceMcRead@0x0017C9F0",
+  "sceMcWrite@0x0017CB08",
+  "sceMcSync@0x0017CC80",
+  "mceGetInfoApdx@0x0017CD48",
+  "sceMcGetInfo@0x0017CDA0",
+  "sceMcGetDir@0x0017CF90",
+  "mceStorePwd@0x0017D0E0",
+  "sceMcChdir@0x0017D170",
+  "sceMcFormat@0x0017D2B0",
+  "sceMcDelete@0x0017D380",
+  "sceMcFlush@0x0017D4A0",
+  "sceMcSetFileInfo@0x0017D560",
+  "sceMcRename@0x0017D730",
+  "sceMcUnformat@0x0017D888",
+  "sceMcGetEntSpace@0x0017D958",
+  "_calloc_r@0x0017E498",
+  "exit@0x0017FA50",
+  "fflush@0x0017FB00",
+  "fread@0x0017FF10",
+  "_free_r@0x00180030",
+  "_malloc_trim_r@0x00180328",
+  "malloc@0x00180C10",
+  "free@0x00180C68",
+  "malloc_extend_top@0x00180CB0",
+  "_malloc_r@0x00180F08",
+  "_mbtowc_r@0x00181630",
+  "memchr@0x00181668",
+  "memcmp@0x00181748",
+  "memcpy@0x001817E0",
+  "memmove@0x00181890",
+  "memset@0x00181998",
+  "__malloc_lock@0x00181A58",
+  "__malloc_unlock@0x00181AD8",
+  "rand@0x00182B58",
+  "_realloc_r@0x00182C20",
+  "strcasecmp@0x00183A68",
+  "strcat@0x00183B40",
+  "strchr@0x00183C70",
+  "strcmp@0x00183E00",
+  "strcpy@0x00183F48",
+  "strlen@0x00184060",
+  "strncat@0x00184198",
+  "strncmp@0x00184348",
+  "strncpy@0x00184500",
+  "strrchr@0x001846C0",
+  "strstr@0x00184710",
+  "vsprintf@0x00188788",
+]
+
+# Guest functions without runtime handlers that may be referenced by address.
+# PS2Recomp keeps their guest implementation and exposes exact callable entries.
+entry_points = [
+  "mwInit@0x0011A110",
+  "_f_ulltof@0x0011A310",
+  "_d_utod@0x0011A360",
+  "_dpfeq@0x0011A3C0",
+  "_dpfle@0x0011A430",
+  "_dpfge@0x0011A480",
+  "__destroy_new_array@0x0011A4B0",
+  "__destroy_arr@0x0011A550",
+  "__construct_array@0x0011A5C0",
+  "__construct_new_array@0x0011A6F0",
+  "__dynamic_cast@0x0011A870",
+  "__dt__Q23std9exceptionFv@0x0011AAB0",
+  "__throw_catch_compare@0x0011AB80",
+  "__initialize_cpp_rts@0x0011AE80",
+  "__ptmf_scall@0x0011AEE0",
+  "__DecodeUnsignedNumber__FPcPUi@0x0011AF40",
+  "__DecodeSignedNumber__FPcPi@0x0011AFF0",
+  "__end__catch@0x0011B0A0",
+  "__ThrowHandler__FP12ThrowContext@0x0011B0E0",
+  "FindExceptionHandler__FP12ThrowContextP13ExceptionInfoPl@0x0011B290",
+  "FindMostRecentException__FP12ThrowContextP13ExceptionInfo@0x0011B5D0",
+  "UnwindStack__FP12ThrowContextP13ExceptionInfoPc@0x0011B750",
+  "NextAction__FP14ActionIterator@0x0011BFA0",
+  "FindExceptionRecord__FPcP13ExceptionInfo@0x0011C2F0",
+  "__TransferControl__FP12ThrowContextP13ExceptionInfoPc@0x0011C4B0",
+  "__throw@0x0011C520",
+  "__SkipUnwindInfo__FPc@0x0011C5A0",
+  "__SetupFrameInfo__FP12ThrowContextP13ExceptionInfo@0x0011C610",
+  "__PopStackFrame__FP12ThrowContextP13ExceptionInfo@0x0011C6D0",
+  "_InitSys@0x0012B2D8",
+  "_InitSys@0x0012C218",
+  "_InitSys@0x0012D1C8",
+  "_InitSys@0x0012DA28",
+  "_InitSys@0x0012E7D0",
+  "_InitSys@0x0012E8E0",
+  "_InitSys@0x0012FBB0",
+  "_InitSys@0x00134D08",
+  "_InitSys@0x00134DB0",
+  "_InitSys@0x001362F8",
+  "_InitSys@0x00136380",
+  "_InitSys@0x00137FA0",
+  "_InitSys@0x001380E8",
+  "_sceCd_Poff_Intr@0x00140298",
+  "_InitSys@0x001485D0",
+  "checkModelVersion@0x00154710",
+  "WaitDma@0x001563A0",
+  "WatchDma@0x00156410",
+  "CheckAddress@0x00156498",
+  "sceDevVu0Pause@0x00156C18",
+  "sceDevVu0PutDBit@0x00156CC8",
+  "sceDevVu0PutTBit@0x00156CF8",
+  "sceDevVu0Sync@0x00156D48",
+  "sceDevVu0GetCnd@0x00156DA8",
+  "sceDevVu0PutCnd@0x00156F18",
+  "sceVuCheckBusy@0x00157080",
+  "sceDevVu1Pause@0x00157150",
+  "sceDevVu1PutDBit@0x00157200",
+  "sceDevVu1PutTBit@0x00157230",
+  "sceDevVu1Sync@0x00157280",
+  "sceDevVu1GetTpc@0x001572D8",
+  "sceDevVu1GetCnd@0x00157300",
+  "sceDevVu1PutCnd@0x00157490",
+  "sceDevVif0Pause@0x00157600",
+  "sceDevVif0Continue@0x00157668",
+  "sceDevVif0PutErr@0x001576A8",
+  "sceDevVif0Sync@0x001576D8",
+  "sceDevVif0GetCnd@0x00157728",
+  "sceDevVif0PutFifo@0x001578A8",
+  "sceDevVif1Reset@0x00157908",
+  "sceDevVif1Pause@0x00157930",
+  "sceDevVif1Continue@0x00157998",
+  "sceDevVif1PutErr@0x001579D8",
+  "sceDevVif1Sync@0x00157A08",
+  "sceDevVif1GetCnd@0x00157A58",
+  "sceDevVif1PutFifo@0x00157C30",
+  "sceDevVif1GetFifo@0x00157C90",
+  "_dualPrimeVector@0x00159440",
+  "_getAllRefs@0x001595C8",
+  "_motionComp0@0x00159CD0",
+  "_getRef0@0x00159F20",
+  "_doMC@0x0015A3A8",
+  "_sceMpegPictureData0@0x0015A5C8",
+  "_slice0@0x0015A808",
+  "_motionVector@0x0015AB38",
+  "_motionVectors@0x0015AF60",
+  "_decMB0@0x0015B100",
+  "_sceMpegMbAddressIncrement@0x0015B658",
+  "_sceMpegWaitIpuIdle@0x0015B7D0",
+  "_sceMpegWaitIpuIdle64@0x0015B938",
+  "_sceMpegNextBit@0x0015BAB8",
+  "_sceMpegPeepBit@0x0015BBA0",
+  "_sceMpegFlushBuf@0x0015BC30",
+  "_waitIpuIdle@0x0015BCC8",
+  "_skipMB0@0x0015BD08",
+  "_copyAddRefImage@0x0015BDC8",
+  "_copyRefImage@0x0015BEB8",
+  "dmaRefImage@0x0015BF78",
+  "_rix_000@0x0015C0F8",
+  "_ri0_000@0x0015C170",
+  "_rix_001@0x0015C208",
+  "_ri0_001@0x0015C2C0",
+  "_rix_010@0x0015C390",
+  "_ri0_010@0x0015C440",
+  "_rix_011@0x0015C4F8",
+  "_ri0_011@0x0015C5F0",
+  "_rix_100@0x0015C6F0",
+  "_ri0_100@0x0015C790",
+  "_rix_101@0x0015C840",
+  "_ri0_101@0x0015C920",
+  "_rix_110@0x0015CA08",
+  "_ri0_110@0x0015CAE0",
+  "_rix_111@0x0015CBB0",
+  "_ri0_111@0x0015CCD0",
+  "receiveDataFromIPU@0x0015CDE8",
+  "_sceMpegSliceA0@0x0015CE88",
+  "_initSeq@0x0015D028",
+  "_sequenceHeader@0x0015D340",
+  "_groupOfPicturesHeader@0x0015D5F0",
+  "_pictureHeader@0x0015D690",
+  "_sequenceExtension@0x0015D7D8",
+  "_quantMatrixExtension@0x0015D918",
+  "_pictureCodingExtension@0x0015DA20",
+  "_extensionAndUserData@0x0015DC28",
+  "_waitIpuIdle@0x0015DDF8",
+  "_sceMpegNextHeader@0x0015DE38",
+  "flushByteBoundary@0x0015DF98",
+  "_sequenceDisplayExtension@0x0015DFE8",
+  "_copyrightExtension@0x0015E078",
+  "_pictureDisplayExtension@0x0015E110",
+  "_clearOnce@0x0015E208",
+  "_sendDataToIPU@0x0015E510",
+  "_clearEach@0x0015E610",
+  "_getpic@0x0015E6D8",
+  "_updateRefImage@0x0015E890",
+  "_decodeOrSkipFrame@0x0015EB48",
+  "_decodeOrSkipField@0x0015ECB8",
+  "sceMpegSetBuffType@0x0015F128",
+  "_sceMpegDispatchMpegCallback@0x0015F170",
+  "_sceMpegDispatchMpegCbNodata@0x0015F1E8",
+  "_decodeOrSkip@0x0015F260",
+  "_decPicture@0x0015F3F8",
+  "_cpr8@0x0015F5D8",
+  "_dispRefImage@0x0015F868",
+  "_dispRefImageField@0x0015FB28",
+  "_sceMpegOutputFrame@0x00160008",
+  "_doCSC2@0x00160098",
+  "_sceMpegCscStoreRefImage@0x00160258",
+  "_ch3dmaCSC@0x00160730",
+  "_ch4dma@0x00160878",
+  "_system_header@0x00160B50",
+  "_pack_header@0x00160D20",
+  "_PES_packet@0x001613C8",
+  "_sceMpegType2id@0x001636A0",
+  "_sceMpegStopIpuDma@0x00163758",
+  "_sceMpegErrorBdec@0x001637F8",
+  "_sceMpegError@0x001638C0",
+  "_sceMpegError1@0x00163918",
+  "setD3_CHCR@0x00163958",
+  "setD4_CHCR@0x001639D0",
+  "setD4_CHCR@0x00163CE8",
+  "VSync@0x00164870",
+  "VSync2@0x00164900",
+  "sbrk@0x00164AE0",
+  "kill@0x00164BB8",
+  "topThread@0x001650E0",
+  "iSuspendThread@0x001653C0",
+  "DelayThread@0x00165458",
+  "_DelayThreadHandler@0x00165698",
+  "sceDeci2GrpOpen@0x00165788",
+  "sceDeci2GrpClose@0x001657B8",
+  "kputs@0x001658D0",
+  "QueuePeekWriteDone@0x00165920",
+  "QueuePeekReadDone@0x00165960",
+  "kputchar@0x00165E40",
+  "deci2Putchar@0x00165E78",
+  "serialPutchar@0x00165F28",
+  "ftoi@0x00165F60",
+  "printfloat@0x00165FF0",
+  "_sceSnprintf@0x001661C8",
+  "snprintf_char@0x00166EE0",
+  "_sceSnprintf_pf@0x00166F88",
+  "sceVsnprintf@0x00166FD8",
+  "sceSnprintf@0x00167010",
+  "sceVprintf@0x00167058",
+  "sceSifSetDmaInternal@0x00167240",
+  "isceSifSendCmd@0x001678F0",
+  "_request_end@0x00167E28",
+  "_alarm_rdata@0x00167EF8",
+  "_request_rdata@0x00167F38",
+  "_search_svdata@0x00168170",
+  "_alarm_bind@0x001681C0",
+  "_request_bind@0x00168200",
+  "_request_call@0x00168420",
+  "_sceFsIobSemaMK@0x00168BE0",
+  "use_iob_cnt@0x00168C50",
+  "new_iob@0x00168CD0",
+  "sceFsSifCallRpc@0x00168D58",
+  "get_iob@0x00168E48",
+  "_sceFs_Rcv_Intr@0x00168EB8",
+  "_sceFsWaitS@0x001692C8",
+  "scePowerOffHandler@0x00169308",
+  "_sceFs_Poff_Intr@0x001693A8",
+  "sceFsSetIopBuf@0x001696C0",
+  "sceFsSetIopPrio@0x00169800",
+  "sceIoctl2@0x0016A7F0",
+  "_sceCallCode@0x0016A9D8",
+  "sceMkdir@0x0016ABA8",
+  "sceFormat@0x0016AD80",
+  "sceAddDrv@0x0016B000",
+  "sceDopen@0x0016B150",
+  "sceDclose@0x0016B218",
+  "sceDread@0x0016B380",
+  "sceGetstat@0x0016B4D8",
+  "sceChstat@0x0016B690",
+  "sceRename@0x0016B8E0",
+  "sceSync@0x0016BB08",
+  "sceMount@0x0016BCB8",
+  "sceLseek64@0x0016BF58",
+  "sceDevctl@0x0016C198",
+  "sceSymlink@0x0016C440",
+  "sceReadlink@0x0016C638",
+  "sceSifQueryMemSize@0x0016CB18",
+  "sceSifQueryMaxFreeMemSize@0x0016CB88",
+  "sceSifQueryTotalFreeMemSize@0x0016CBF8",
+  "sceSifQueryBlockTopAddress@0x0016CC68",
+  "sceSifQueryBlockSize@0x0016CCE8",
+  "_lf_bind@0x0016CD68",
+  "sceSifStopModule@0x0016D138",
+  "sceSifUnloadModule@0x0016D340",
+  "sceSifSearchModuleByName@0x0016D3D0",
+  "sceSifSearchModuleByAddress@0x0016D470",
+  "SetTLBHandler@0x0016DDA8",
+  "SetDebugHandler@0x0016DE08",
+  "kCopy@0x0016DEA0",
+  "InitTLBFunctions@0x0016DEF8",
+  "SetTLBEntry@0x0016DFF0",
+  "InitTLB32MB@0x0016E0C0",
+  "_kTLBException@0x0016E2C0",
+  "_kExitTLBHandler@0x0016E400",
+  "_kDebugException@0x0016E500",
+  "DIntr@0x0016E620",
+  "supplement_crt0@0x0016E688",
+  "kCopy@0x0016E708",
+  "kFindAddress@0x0016E740",
+  "GetSystemCallEntry@0x0016E790",
+  "InitSystemCallTableAddress@0x0016E7C8",
+  "_InitSys@0x0016E8D8",
+  "kCopy@0x0016E950",
+  "PatchIsNeeded@0x0016E998",
+  "InitExecPS2@0x0016EA00",
+  "kCopy@0x0016EAC0",
+  "SetArg@0x0016EB00",
+  "ExecPS2@0x0016EC20",
+  "LoadExecPS2@0x0016EC90",
+  "ExecOSD@0x0016ED00",
+  "kCopy@0x0016ED70",
+  "SetT2@0x0016EE90",
+  "InitTimer@0x0016EF30",
+  "EndTimer@0x0016F088",
+  "GetTimerPreScaleFactor@0x0016F140",
+  "StartTimerSystemTime@0x0016F170",
+  "StopTimerSystemTime@0x0016F200",
+  "SetNextComp@0x0016F280",
+  "InsertAlarm@0x0016F410",
+  "UnlinkAlarm@0x0016F498",
+  "cbTimerHandler@0x0016F4D0",
+  "iGetTimerSystemTime@0x0016F788",
+  "GetTimerSystemTime@0x0016F7D8",
+  "iAllocTimerCounter@0x0016F858",
+  "AllocTimerCounter@0x0016F8C8",
+  "iFreeTimerCounter@0x0016F910",
+  "iGetTimerUsedUnusedCounters@0x0016FA20",
+  "GetTimerUsedUnusedCounters@0x0016FA70",
+  "iStartTimerCounter@0x0016FAD0",
+  "iStopTimerCounter@0x0016FBD0",
+  "SetTimerCount@0x0016FD00",
+  "iGetTimerCount@0x0016FE68",
+  "iSetTimerHandler@0x0016FF28",
+  "SetTimerHandler@0x00170038",
+  "SetTimerAlarm@0x00170310",
+  "iSetTimerAlarm@0x00170440",
+  "ReleaseTimerAlarm@0x00170530",
+  "iReleaseTimerAlarm@0x001705D8",
+  "sceSifSetRebootNotifyBuffer@0x00170678",
+  "sceSifAddRebootNotifyHandler@0x001706F8",
+  "sceSifRemoveRebootNotifyHandler@0x001707B0",
+  "sceSifExecNotifyHandler@0x00170808",
+  "__ieee754_atan2@0x00170D90",
+  "__ieee754_fmod@0x001710D0",
+  "__ieee754_rem_pio2@0x001714F0",
+  "__ieee754_sqrt@0x00171AA8",
+  "__ieee754_acosf@0x00171DC8",
+  "__ieee754_asinf@0x001721F0",
+  "__ieee754_atan2f@0x00172590",
+  "__ieee754_sqrtf@0x00172B20",
+  "__kernel_cos@0x00172BF0",
+  "__kernel_rem_pio2@0x00172EC8",
+  "__kernel_sin@0x00173A18",
+  "__kernel_rem_pio2f@0x00173DA0",
+  "__kernel_tanf@0x00174710",
+  "atanf@0x001755C8",
+  "cosf@0x00175898",
+  "fabsf@0x00175970",
+  "floorf@0x00175998",
+  "sinf@0x00175BC8",
+  "tanf@0x00175CB0",
+  "__muldi3@0x00175DD0",
+  "__moddi3@0x001764E0",
+  "__udivdi3@0x00176B70",
+  "__umoddi3@0x001770F0",
+  "__floatdidf@0x00177658",
+  "__floatdisf@0x00177700",
+  "__fixunsdfdi@0x001777E8",
+  "__fixdfdi@0x00177900",
+  "__fixunssfdi@0x00177978",
+  "__fixsfdi@0x00177AA0",
+  "__pack_f@0x00177AE0",
+  "__unpack_f@0x00177B98",
+  "__make_fp@0x00177BF8",
+  "fptodp@0x00177C28",
+  "__pack_d@0x00177C68",
+  "__unpack_d@0x00177D40",
+  "_fpadd_parts@0x00177E00",
+  "dpadd@0x00178060",
+  "dpsub@0x001780B8",
+  "dpmul@0x00178120",
+  "dpdiv@0x001783A8",
+  "__fpcmp_parts_d@0x001784E8",
+  "dpcmp@0x00178608",
+  "litodp@0x00178658",
+  "dptoli@0x00178710",
+  "__make_dp@0x001787B0",
+  "dptofp@0x001787E0",
+  "dptoul@0x00178838",
+  "_sceCd_cd_read_intr@0x00178B50",
+  "cmd_sem_init@0x00178C08",
+  "cdvd_exit@0x00178CF0",
+  "sceCdPOffCallback@0x00178D90",
+  "_sceCd_Poff_Intr@0x00178E10",
+  "PowerOffCB@0x00178E68",
+  "sceCdLayerSearchFile@0x00178EE0",
+  "_sceCd_ncmd_prechk@0x00179200",
+  "_sceCd_scmd_prechk@0x00179500",
+  "_sceCdSC@0x00179658",
+  "sceCdDiskReady_old@0x001799F0",
+  "sceCdGetDiskType2@0x0017A0D8",
+  "_pad_intr_hdr@0x0017AB88",
+  "_send_to_iop@0x0017AD78",
+  "scePadSetDmaCallback@0x0017C010",
+  "scePadSetFlushRate@0x0017C138",
+  "sceMcUdCheckNewCard@0x0017CF20",
+  "regMain@0x0017DA68",
+  "mceRegistSifFunc@0x0017DAD0",
+  "mceEncEcc@0x0017DB50",
+  "mceDecEcc@0x0017DBD0",
+  "mceDecEccAll@0x0017DCE8",
+  "mceExtractSliceData@0x0017DD70",
+  "mceSifEntry@0x0017DEA0",
+  "sceMcReadFast@0x0017DF60",
+  "sceMcWriteFast@0x0017E070",
+  "sceMSIn_Init@0x0017E170",
+  "put_message@0x0017E200",
+  "sceMSIn_PutMsg@0x0017E298",
+  "sceMSIn_PutExcMsg@0x0017E348",
+  "sceMSIn_PutHsMsg@0x0017E3C0",
+  "atoi@0x0017E450",
+  "quorem@0x0017E5A8",
+  "_dtoa_r@0x0017E7D8",
+  "std@0x0017FC18",
+  "__sfmoreglue@0x0017FC78",
+  "__sfp@0x0017FCF0",
+  "__sinit@0x0017FE28",
+  "__sfvwrite@0x001804F8",
+  "_fwalk@0x001808D8",
+  "_setlocale_r@0x00180970",
+  "__smakebuf@0x00180AB8",
+  "_Balloc@0x00181B28",
+  "_Bfree@0x00181BD0",
+  "_multadd@0x00181C00",
+  "_s2b@0x00181D08",
+  "_hi0bits@0x00181E38",
+  "_lo0bits@0x00181EB8",
+  "_i2b@0x00181F78",
+  "_multiply@0x00181FB0",
+  "_pow5mult@0x001821C0",
+  "_lshift@0x001822C0",
+  "__mcmp@0x00182418",
+  "__mdiff@0x00182480",
+  "_ulp@0x00182610",
+  "_b2d@0x001826E0",
+  "_d2b@0x00182878",
+  "_ratio@0x00182A00",
+  "_mprec_log10@0x00182AD0",
+  "lflush@0x001831C0",
+  "__srefill@0x001831F8",
+  "_init_signal_r@0x001833D0",
+  "_signal_r@0x00183440",
+  "_raise_r@0x001834C0",
+  "__sigtramp_r@0x00183598",
+  "_sprintf_r@0x00183730",
+  "sscanf@0x00183850",
+  "__sread@0x001838F8",
+  "__swrite@0x00183960",
+  "__sseek@0x001839E0",
+  "_strtod_r@0x00184798",
+  "strtodf@0x001856D8",
+  "strtok_r@0x00185720",
+  "_strtol_r@0x001857E8",
+  "_strtoul_r@0x00185A50",
+  "strupr@0x00185CB0",
+  "__submore@0x00185D00",
+  "ungetc@0x00185DE8",
+  "__sprint@0x00185F70",
+  "__sbprintf@0x00185FB8",
+  "_vfprintf_r@0x001860E8",
+  "cvt@0x00187758",
+  "exponent@0x00187918",
+  "__svfscanf@0x001879F8",
+  "__sccl@0x00188688",
+  "vsprintf_r@0x001887E0",
+  "__swbuf@0x00188838",
+  "__swsetup@0x001889A8",
+  "GetRomName@0x003F51E8",
+  "IsT10K@0x003F5258",
+  "sceScfGetLanguage@0x003F5298",
+  "sceScfGetAspect@0x003F5318",
+  "sceScfGetSpdif@0x003F5358",
+  "sceScfGetTimeZone@0x003F5398",
+  "sceScfGetDateNotation@0x003F53E8",
+  "sceScfGetSummerTime@0x003F5450",
+  "sceScfGetTimeNotation@0x003F54B8",
+  "tobcd@0x003F5520",
+  "frombcd@0x003F5550",
+  "adddate@0x003F5640",
+  "subdate@0x003F56F8",
+  "addhour@0x003F57A0",
+  "subhour@0x003F57D0",
+  "AdjustTime@0x003F57F8",
+  "sceScfGetLocalTimefromRTC@0x003F5890",
+]
+
+# Legacy compatibility field. The analyzer no longer auto-populates skip entries.
+skip = []
+
+# Detected MMIO accesses
+[mmio]
+"0x430760" = "0x1000f000"
+"0x430758" = "0x1000f000"
+"0x16f798" = "0x10001010"
+"0x16f710" = "0x10001010"
+"0x16f6dc" = "0x10001000"
+"0x16f588" = "0x10001000"
+"0x16f548" = "0x10001010"
+"0x165e48" = "0x1000f130"
+"0x16497c" = "0x1000f000"
+"0x163d2c" = "0x1000b400"
+"0x163d24" = "0x1000f590"
+"0x163a14" = "0x1000b400"
+"0x163a0c" = "0x1000f590"
+"0x1639a0" = "0x1000f520"
+"0x16399c" = "0x1000b000"
+"0x163994" = "0x1000f590"
+"0x16397c" = "0x1000f520"
+"0x16488c" = "0x1000f000"
+"0x16387c" = "0x1000f590"
+"0x163838" = "0x10002010"
+"0x1637ec" = "0x10002010"
+"0x1637dc" = "0x1000b420"
+"0x1637d4" = "0x1000b020"
+"0x160934" = "0x1000b400"
+"0x163d0c" = "0x1000f520"
+"0x1608d8" = "0x1000b400"
+"0x1608c8" = "0x1000b420"
+"0x16f544" = "0x10001000"
+"0x163888" = "0x1000f520"
+"0x160858" = "0x1000b000"
+"0x160850" = "0x1000b020"
+"0x1607b4" = "0x1000b010"
+"0x16076c" = "0x1000b000"
+"0x160698" = "0x1000b000"
+"0x16061c" = "0x1000b000"
+"0x160510" = "0x10002010"
+"0x16492c" = "0x1000f000"
+"0x1604e8" = "0x1000b000"
+"0x16045c" = "0x1000b020"
+"0x1603c4" = "0x1000b400"
+"0x1603ac" = "0x1000b410"
+"0x160310" = "0x10002010"
+"0x1602c0" = "0x10002010"
+"0x1602ac" = "0x10002010"
+"0x1601b4" = "0x10002000"
+"0x160184" = "0x1000b020"
+"0x1603b4" = "0x1000b420"
+"0x15f7a8" = "0x1000d000"
+"0x15f784" = "0x1000d000"
+"0x15f764" = "0x1000d080"
+"0x160740" = "0x1000e010"
+"0x15f730" = "0x1000d400"
+"0x16f7fc" = "0x10001010"
+"0x15f6fc" = "0x1000d420"
+"0x1602fc" = "0x10002000"
+"0x15f6f0" = "0x1000d410"
+"0x15e658" = "0x1000b000"
+"0x15e650" = "0x1000f590"
+"0x15e5dc" = "0x1000b420"
+"0x15de08" = "0x10002010"
+"0x16f010" = "0x10001010"
+"0x15dafc" = "0x10002010"
+"0x15da88" = "0x10002010"
+"0x16f6ac" = "0x10001010"
+"0x15d990" = "0x10002000"
+"0x15d950" = "0x10002000"
+"0x16f2b4" = "0x10001010"
+"0x15d598" = "0x10002000"
+"0x15d56c" = "0x1000b420"
+"0x1608c0" = "0x1000b410"
+"0x15d48c" = "0x10002000"
+"0x15d3e4" = "0x10002000"
+"0x15e218" = "0x10002010"
+"0x108cc8" = "0x1000e010"
+"0x1637a0" = "0x1000b400"
+"0x1576e0" = "0x10003800"
+"0x1082a4" = "0x10000000"
+"0x102cbc" = "0x1000b420"
+"0x107a14" = "0x10009030"
+"0x1648e0" = "0x1000f000"
+"0x15d46c" = "0x1000b420"
+"0x105af8" = "0x1000e010"
+"0x107a7c" = "0x1000f590"
+"0x163d30" = "0x1000f520"
+"0x103730" = "0x1000f590"
+"0x10371c" = "0x1000f520"
+"0x108cd0" = "0x10009000"
+"0x107a60" = "0x10009000"
+"0x103714" = "0x1000b000"
+"0x1607dc" = "0x10002000"
+"0x15dfb4" = "0x10002020"
+"0x107a54" = "0x1000f590"
+"0x103708" = "0x1000f590"
+"0x163864" = "0x1000f520"
+"0x15bbe8" = "0x10002000"
+"0x107a44" = "0x1000f520"
+"0x160490" = "0x10002000"
+"0x105aec" = "0x1000e000"
+"0x1036f8" = "0x1000f520"
+"0x157c58" = "0x10003c00"
+"0x1036c0" = "0x1000f590"
+"0x16f508" = "0x10001010"
+"0x15abc0" = "0x10002020"
+"0x1036ac" = "0x1000f520"
+"0x157a10" = "0x10003c00"
+"0x1648b0" = "0x1000f000"
+"0x16046c" = "0x1000b000"
+"0x1036a4" = "0x1000b400"
+"0x15b988" = "0x10002010"
+"0x15e660" = "0x1000b400"
+"0x102cac" = "0x1000b410"
+"0x1638b4" = "0x1000b020"
+"0x157bf8" = "0x10003c50"
+"0x15ab98" = "0x10002000"
+"0x15e668" = "0x1000d400"
+"0x102cb4" = "0x1000b430"
+"0x163798" = "0x1000b000"
+"0x102d94" = "0x1000b430"
+"0x15f76c" = "0x1000d010"
+"0x1079f4" = "0x10009020"
+"0x15e638" = "0x1000f520"
+"0x102c84" = "0x10002000"
+"0x1577d8" = "0x10003930"
+"0x1086bc" = "0x10000000"
+"0x15e6a8" = "0x1000b420"
+"0x15a668" = "0x10002010"
+"0x163884" = "0x1000b000"
+"0x103688" = "0x1000f520"
+"0x102c64" = "0x10002010"
+"0x15d818" = "0x10002010"
+"0x1577b8" = "0x10003920"
+"0x1027b4" = "0x1000b410"
+"0x1079fc" = "0x10009010"
+"0x163a18" = "0x1000f520"
+"0x15a988" = "0x10002010"
+"0x102c8c" = "0x10002010"
+"0x1027ac" = "0x1000b420"
+"0x15f6e8" = "0x1000d480"
+"0x15a698" = "0x1000b420"
+"0x15a894" = "0x1000b020"
+"0x102044" = "0x10002020"
+"0x15e6c8" = "0x10002010"
+"0x10351c" = "0x1000b430"
+"0x164950" = "0x1000f000"
+"0x108f9c" = "0x10009030"
+"0x157880" = "0x10003850"
+"0x160190" = "0x1000b000"
+"0x1027bc" = "0x1000b430"
+"0x108cf0" = "0x10009010"
+"0x15bcd8" = "0x10002010"
+"0x102c34" = "0x1000b020"
+"0x16f708" = "0x10001000"
+"0x102038" = "0x1000b410"
+"0x107a68" = "0x1000f520"
+"0x102e1c" = "0x10002020"
+"0x1606c0" = "0x10002010"
+"0x15e6a0" = "0x1000b020"
+"0x106120" = "0x10000000"
+"0x102cec" = "0x10002010"
+"0x102ee8" = "0x1000b410"
+"0x160758" = "0x1000b020"
+"0x15db2c" = "0x10002010"
+"0x102d84" = "0x1000b410"
+"0x163790" = "0x1000f590"
+"0x157ad4" = "0x10003d10"
+"0x16f190" = "0x10001010"
+"0x15bc5c" = "0x10002000"
+"0x15b858" = "0x10002020"
+"0x102ee0" = "0x1000b400"
+"0x157694" = "0x10003810"
+"0x15f778" = "0x1000d020"
+"0x15db5c" = "0x10002010"
+"0x102db4" = "0x1000b400"
+"0x15e674" = "0x1000f520"
+"0x15ce5c" = "0x1000b000"
+"0x102dc4" = "0x10002010"
+"0x157918" = "0x10003c10"
+"0x157b14" = "0x10003d30"
+"0x1637a8" = "0x1000f520"
+"0x102da4" = "0x1000b420"
+"0x157af4" = "0x10003d20"
+"0x15e6b0" = "0x1000d420"
+"0x103504" = "0x1000b410"
+"0x102e2c" = "0x10002010"
+"0x16060c" = "0x1000b020"
+"0x15e5ec" = "0x1000b400"
+"0x157980" = "0x10003c10"
+"0x163778" = "0x1000f520"
+"0x15bafc" = "0x10002000"
+"0x102c24" = "0x1000b010"
+"0x1607d0" = "0x1000b000"
+"0x102dfc" = "0x1000b020"
+"0x15a6f4" = "0x10002020"
+"0x108eb8" = "0x10000000"
+"0x1578d0" = "0x10003800"
+"0x108f0c" = "0x10009020"
+"0x15aeb8" = "0x10002000"
+"0x108f44" = "0x10009030"
+"0x15acf4" = "0x10002020"
+"0x15c0c0" = "0x1000d400"
+"0x108f94" = "0x10009040"
+"0x160918" = "0x1000b410"
+"0x15d4e4" = "0x10002000"
+"0x108fa4" = "0x10009050"
+"0x108fac" = "0x10009040"
+"0x16f740" = "0x10001000"
+"0x1579c4" = "0x10003c10"
+"0x16f6a4" = "0x10001000"
+"0x15ad5c" = "0x10002000"
+"0x15d578" = "0x1000b400"
+"0x15b154" = "0x10002010"
+"0x430e54" = "0x1000f000"
+"0x109008" = "0x10009000"
+"0x160640" = "0x10002000"
+"0x159dd8" = "0x1000d400"
+"0x15b1b0" = "0x10002020"
+"0x157650" = "0x10003810"
+"0x160210" = "0x10002010"
+"0x15b9c8" = "0x10002020"
+"0x157798" = "0x10003910"
+"0x108c1c" = "0x10003c10"
+"0x15a934" = "0x10002020"
+"0x160888" = "0x1000e010"
+"0x105ae0" = "0x1000e000"
+"0x108f14" = "0x10009010"
+"0x1577f8" = "0x10003940"
+"0x1607c0" = "0x1000b020"
+"0x102dec" = "0x1000b010"
+"0x157b34" = "0x10003d40"
+"0x16f220" = "0x10001010"
+"0x15a8d8" = "0x1000b420"
+"0x15f7d0" = "0x1000d020"
+"0x102e0c" = "0x1000b000"
+"0x157b54" = "0x10003d50"
+"0x157cb8" = "0x10003c00"
+"0x1639f4" = "0x1000f520"
+"0x159d58" = "0x1000d400"
+"0x43078c" = "0x1000f000"
+"0x1034ec" = "0x1000b420"
+"0x106118" = "0x10000010"
+"0x15a658" = "0x1000b020"
+"0x107a20" = "0x1000e010"
+"0x15a748" = "0x10002010"
+"0x108fb4" = "0x10009050"
+"0x15accc" = "0x10002000"
+"0x15aee0" = "0x10002020"
+"0x15a8a4" = "0x10002010"
+"0x15c0bc" = "0x1000d420"
+"0x15ad84" = "0x10002020"
+"0x15b188" = "0x10002000"
+"0x15b6a4" = "0x10002000"
+"0x15f708" = "0x1000d400"
+"0x15b6c8" = "0x10002020"
+"0x103698" = "0x1000f590"
+"0x15b814" = "0x10002010"
+"0x15ce44" = "0x1000b010"
+
+# Jump tables detected in the program
+[jump_tables]
+[[jump_tables.table]]
+address = "0x586d60"
+entries = [
+  { index = 0, target = "0x121240" },
+  { index = 1, target = "0x121248" },
+  { index = 2, target = "0x121250" },
+  { index = 3, target = "0x121258" },
+  { index = 4, target = "0x121268" },
+  { index = 5, target = "0x121278" },
+]
+
+[[jump_tables.table]]
+address = "0x586d80"
+entries = [
+  { index = 0, target = "0x1212d8" },
+  { index = 1, target = "0x1212e0" },
+  { index = 2, target = "0x1212e8" },
+  { index = 3, target = "0x1212f0" },
+  { index = 4, target = "0x1212f8" },
+  { index = 5, target = "0x121310" },
+]
+
+[[jump_tables.table]]
+address = "0x586ef0"
+entries = [
+  { index = 0, target = "0x122d08" },
+  { index = 1, target = "0x122d20" },
+  { index = 2, target = "0x122d28" },
+  { index = 3, target = "0x122d30" },
+  { index = 4, target = "0x122d38" },
+  { index = 5, target = "0x122d50" },
+]
+
+[[jump_tables.table]]
+address = "0x58f440"
+entries = [
+  { index = 0, target = "0x184b8c" },
+  { index = 1, target = "0x184830" },
+  { index = 2, target = "0x184830" },
+  { index = 3, target = "0x184830" },
+  { index = 4, target = "0x184830" },
+  { index = 5, target = "0x184830" },
+  { index = 6, target = "0x184830" },
+  { index = 7, target = "0x184830" },
+  { index = 8, target = "0x184830" },
+  { index = 9, target = "0x184828" },
+  { index = 10, target = "0x184828" },
+  { index = 11, target = "0x184828" },
+  { index = 12, target = "0x184828" },
+  { index = 13, target = "0x184828" },
+  { index = 14, target = "0x184830" },
+  { index = 15, target = "0x184830" },
+  { index = 16, target = "0x184830" },
+  { index = 17, target = "0x184830" },
+  { index = 18, target = "0x184830" },
+  { index = 19, target = "0x184830" },
+  { index = 20, target = "0x184830" },
+  { index = 21, target = "0x184830" },
+  { index = 22, target = "0x184830" },
+  { index = 23, target = "0x184830" },
+  { index = 24, target = "0x184830" },
+  { index = 25, target = "0x184830" },
+  { index = 26, target = "0x184830" },
+  { index = 27, target = "0x184830" },
+  { index = 28, target = "0x184830" },
+  { index = 29, target = "0x184830" },
+  { index = 30, target = "0x184830" },
+  { index = 31, target = "0x184830" },
+  { index = 32, target = "0x184828" },
+  { index = 33, target = "0x184830" },
+  { index = 34, target = "0x184830" },
+  { index = 35, target = "0x184830" },
+  { index = 36, target = "0x184830" },
+  { index = 37, target = "0x184830" },
+  { index = 38, target = "0x184830" },
+  { index = 39, target = "0x184830" },
+  { index = 40, target = "0x184830" },
+  { index = 41, target = "0x184830" },
+  { index = 42, target = "0x184830" },
+  { index = 43, target = "0x184810" },
+  { index = 44, target = "0x184830" },
+  { index = 45, target = "0x184808" },
+]
+
+[[jump_tables.table]]
+address = "0x58f5b0"
+entries = [
+  { index = 0, target = "0x1862b0" },
+  { index = 1, target = "0x186960" },
+  { index = 2, target = "0x186960" },
+  { index = 3, target = "0x1862c8" },
+  { index = 4, target = "0x186960" },
+  { index = 5, target = "0x186960" },
+  { index = 6, target = "0x186960" },
+  { index = 7, target = "0x186960" },
+  { index = 8, target = "0x186960" },
+  { index = 9, target = "0x186960" },
+  { index = 10, target = "0x1862d0" },
+  { index = 11, target = "0x1862f8" },
+  { index = 12, target = "0x186960" },
+  { index = 13, target = "0x1862ec" },
+  { index = 14, target = "0x186308" },
+  { index = 15, target = "0x186960" },
+  { index = 16, target = "0x186388" },
+  { index = 17, target = "0x186390" },
+  { index = 18, target = "0x186390" },
+  { index = 19, target = "0x186390" },
+  { index = 20, target = "0x186390" },
+  { index = 21, target = "0x186390" },
+  { index = 22, target = "0x186390" },
+  { index = 23, target = "0x186390" },
+  { index = 24, target = "0x186390" },
+  { index = 25, target = "0x186390" },
+  { index = 26, target = "0x186960" },
+  { index = 27, target = "0x186960" },
+  { index = 28, target = "0x186960" },
+  { index = 29, target = "0x186960" },
+  { index = 30, target = "0x186960" },
+  { index = 31, target = "0x186960" },
+  { index = 32, target = "0x186960" },
+  { index = 33, target = "0x186960" },
+  { index = 34, target = "0x186960" },
+  { index = 35, target = "0x186960" },
+  { index = 36, target = "0x186420" },
+  { index = 37, target = "0x186478" },
+  { index = 38, target = "0x186960" },
+  { index = 39, target = "0x186478" },
+  { index = 40, target = "0x186960" },
+  { index = 41, target = "0x186960" },
+  { index = 42, target = "0x186960" },
+  { index = 43, target = "0x186960" },
+  { index = 44, target = "0x1863c8" },
+  { index = 45, target = "0x186960" },
+  { index = 46, target = "0x186960" },
+  { index = 47, target = "0x1866b8" },
+  { index = 48, target = "0x186960" },
+  { index = 49, target = "0x186960" },
+  { index = 50, target = "0x186960" },
+  { index = 51, target = "0x186960" },
+  { index = 52, target = "0x186960" },
+  { index = 53, target = "0x186788" },
+  { index = 54, target = "0x186960" },
+  { index = 55, target = "0x186960" },
+  { index = 56, target = "0x1867d0" },
+  { index = 57, target = "0x186960" },
+  { index = 58, target = "0x186960" },
+  { index = 59, target = "0x186960" },
+  { index = 60, target = "0x186960" },
+  { index = 61, target = "0x186960" },
+  { index = 62, target = "0x186960" },
+  { index = 63, target = "0x186960" },
+  { index = 64, target = "0x186960" },
+  { index = 65, target = "0x186960" },
+  { index = 66, target = "0x186960" },
+  { index = 67, target = "0x186400" },
+  { index = 68, target = "0x186424" },
+  { index = 69, target = "0x186478" },
+  { index = 70, target = "0x186478" },
+  { index = 71, target = "0x186478" },
+  { index = 72, target = "0x1863d0" },
+  { index = 73, target = "0x186424" },
+  { index = 74, target = "0x186960" },
+  { index = 75, target = "0x186960" },
+  { index = 76, target = "0x1863d8" },
+  { index = 77, target = "0x186960" },
+  { index = 78, target = "0x186658" },
+  { index = 79, target = "0x1866bc" },
+  { index = 80, target = "0x186700" },
+  { index = 81, target = "0x1863ec" },
+  { index = 82, target = "0x186960" },
+  { index = 83, target = "0x186728" },
+  { index = 84, target = "0x186960" },
+  { index = 85, target = "0x18678c" },
+  { index = 86, target = "0x186960" },
+  { index = 87, target = "0x186960" },
+  { index = 88, target = "0x1867e0" },
+]
+
+[[jump_tables.table]]
+address = "0x58f5b0"
+entries = [
+  { index = 0, target = "0x1862b0" },
+  { index = 1, target = "0x186960" },
+  { index = 2, target = "0x186960" },
+  { index = 3, target = "0x1862c8" },
+  { index = 4, target = "0x186960" },
+  { index = 5, target = "0x186960" },
+  { index = 6, target = "0x186960" },
+  { index = 7, target = "0x186960" },
+  { index = 8, target = "0x186960" },
+  { index = 9, target = "0x186960" },
+  { index = 10, target = "0x1862d0" },
+  { index = 11, target = "0x1862f8" },
+  { index = 12, target = "0x186960" },
+  { index = 13, target = "0x1862ec" },
+  { index = 14, target = "0x186308" },
+  { index = 15, target = "0x186960" },
+  { index = 16, target = "0x186388" },
+  { index = 17, target = "0x186390" },
+  { index = 18, target = "0x186390" },
+  { index = 19, target = "0x186390" },
+  { index = 20, target = "0x186390" },
+  { index = 21, target = "0x186390" },
+  { index = 22, target = "0x186390" },
+  { index = 23, target = "0x186390" },
+  { index = 24, target = "0x186390" },
+  { index = 25, target = "0x186390" },
+  { index = 26, target = "0x186960" },
+  { index = 27, target = "0x186960" },
+  { index = 28, target = "0x186960" },
+  { index = 29, target = "0x186960" },
+  { index = 30, target = "0x186960" },
+  { index = 31, target = "0x186960" },
+  { index = 32, target = "0x186960" },
+  { index = 33, target = "0x186960" },
+  { index = 34, target = "0x186960" },
+  { index = 35, target = "0x186960" },
+  { index = 36, target = "0x186420" },
+  { index = 37, target = "0x186478" },
+  { index = 38, target = "0x186960" },
+  { index = 39, target = "0x186478" },
+  { index = 40, target = "0x186960" },
+  { index = 41, target = "0x186960" },
+  { index = 42, target = "0x186960" },
+  { index = 43, target = "0x186960" },
+  { index = 44, target = "0x1863c8" },
+  { index = 45, target = "0x186960" },
+  { index = 46, target = "0x186960" },
+  { index = 47, target = "0x1866b8" },
+  { index = 48, target = "0x186960" },
+  { index = 49, target = "0x186960" },
+  { index = 50, target = "0x186960" },
+  { index = 51, target = "0x186960" },
+  { index = 52, target = "0x186960" },
+  { index = 53, target = "0x186788" },
+  { index = 54, target = "0x186960" },
+  { index = 55, target = "0x186960" },
+  { index = 56, target = "0x1867d0" },
+  { index = 57, target = "0x186960" },
+  { index = 58, target = "0x186960" },
+  { index = 59, target = "0x186960" },
+  { index = 60, target = "0x186960" },
+  { index = 61, target = "0x186960" },
+  { index = 62, target = "0x186960" },
+  { index = 63, target = "0x186960" },
+  { index = 64, target = "0x186960" },
+  { index = 65, target = "0x186960" },
+  { index = 66, target = "0x186960" },
+  { index = 67, target = "0x186400" },
+  { index = 68, target = "0x186424" },
+  { index = 69, target = "0x186478" },
+  { index = 70, target = "0x186478" },
+  { index = 71, target = "0x186478" },
+  { index = 72, target = "0x1863d0" },
+  { index = 73, target = "0x186424" },
+  { index = 74, target = "0x186960" },
+  { index = 75, target = "0x186960" },
+  { index = 76, target = "0x1863d8" },
+  { index = 77, target = "0x186960" },
+  { index = 78, target = "0x186658" },
+  { index = 79, target = "0x1866bc" },
+  { index = 80, target = "0x186700" },
+  { index = 81, target = "0x1863ec" },
+  { index = 82, target = "0x186960" },
+  { index = 83, target = "0x186728" },
+  { index = 84, target = "0x186960" },
+  { index = 85, target = "0x18678c" },
+  { index = 86, target = "0x186960" },
+  { index = 87, target = "0x186960" },
+  { index = 88, target = "0x1867e0" },
+]
+
+[[jump_tables.table]]
+address = "0x58f750"
+entries = [
+  { index = 0, target = "0x187cf0" },
+  { index = 1, target = "0x187cf8" },
+  { index = 2, target = "0x187cf8" },
+  { index = 3, target = "0x187cf8" },
+  { index = 4, target = "0x187cf8" },
+  { index = 5, target = "0x187cf8" },
+  { index = 6, target = "0x187cf8" },
+  { index = 7, target = "0x187cf8" },
+  { index = 8, target = "0x187cf8" },
+  { index = 9, target = "0x187cf8" },
+  { index = 10, target = "0x187cf8" },
+  { index = 11, target = "0x187cf8" },
+  { index = 12, target = "0x187cf8" },
+  { index = 13, target = "0x187cf8" },
+  { index = 14, target = "0x187cf8" },
+  { index = 15, target = "0x187cf8" },
+  { index = 16, target = "0x187cf8" },
+  { index = 17, target = "0x187cf8" },
+  { index = 18, target = "0x187cf8" },
+  { index = 19, target = "0x187cf8" },
+  { index = 20, target = "0x187cf8" },
+  { index = 21, target = "0x187cf8" },
+  { index = 22, target = "0x187cf8" },
+  { index = 23, target = "0x187cf8" },
+  { index = 24, target = "0x187cf8" },
+  { index = 25, target = "0x187cf8" },
+  { index = 26, target = "0x187cf8" },
+  { index = 27, target = "0x187cf8" },
+  { index = 28, target = "0x187cf8" },
+  { index = 29, target = "0x187cf8" },
+  { index = 30, target = "0x187cf8" },
+  { index = 31, target = "0x187cf8" },
+  { index = 32, target = "0x187cf8" },
+  { index = 33, target = "0x187cf8" },
+  { index = 34, target = "0x187cf8" },
+  { index = 35, target = "0x187cf8" },
+  { index = 36, target = "0x187cf8" },
+  { index = 37, target = "0x187b18" },
+  { index = 38, target = "0x187cf8" },
+  { index = 39, target = "0x187cf8" },
+  { index = 40, target = "0x187cf8" },
+  { index = 41, target = "0x187cf8" },
+  { index = 42, target = "0x187b80" },
+  { index = 43, target = "0x187cf8" },
+  { index = 44, target = "0x187cf8" },
+  { index = 45, target = "0x187cf8" },
+  { index = 46, target = "0x187cf8" },
+  { index = 47, target = "0x187cf8" },
+  { index = 48, target = "0x187ba0" },
+  { index = 49, target = "0x187ba0" },
+  { index = 50, target = "0x187ba0" },
+  { index = 51, target = "0x187ba0" },
+  { index = 52, target = "0x187ba0" },
+  { index = 53, target = "0x187ba0" },
+  { index = 54, target = "0x187ba0" },
+  { index = 55, target = "0x187ba0" },
+  { index = 56, target = "0x187ba0" },
+  { index = 57, target = "0x187ba0" },
+  { index = 58, target = "0x187cf8" },
+  { index = 59, target = "0x187cf8" },
+  { index = 60, target = "0x187cf8" },
+  { index = 61, target = "0x187cf8" },
+  { index = 62, target = "0x187cf8" },
+  { index = 63, target = "0x187cf8" },
+  { index = 64, target = "0x187cf8" },
+  { index = 65, target = "0x187cf8" },
+  { index = 66, target = "0x187cf8" },
+  { index = 67, target = "0x187cf8" },
+  { index = 68, target = "0x187bb8" },
+  { index = 69, target = "0x187c30" },
+  { index = 70, target = "0x187cf8" },
+  { index = 71, target = "0x187c30" },
+  { index = 72, target = "0x187cf8" },
+  { index = 73, target = "0x187cf8" },
+  { index = 74, target = "0x187cf8" },
+  { index = 75, target = "0x187cf8" },
+  { index = 76, target = "0x187b90" },
+  { index = 77, target = "0x187cf8" },
+  { index = 78, target = "0x187cf8" },
+  { index = 79, target = "0x187be8" },
+  { index = 80, target = "0x187cf8" },
+  { index = 81, target = "0x187cf8" },
+  { index = 82, target = "0x187cf8" },
+  { index = 83, target = "0x187cf8" },
+  { index = 84, target = "0x187cf8" },
+  { index = 85, target = "0x187cf8" },
+  { index = 86, target = "0x187cf8" },
+  { index = 87, target = "0x187cf8" },
+  { index = 88, target = "0x187c20" },
+  { index = 89, target = "0x187cf8" },
+  { index = 90, target = "0x187cf8" },
+  { index = 91, target = "0x187c40" },
+  { index = 92, target = "0x187cf8" },
+  { index = 93, target = "0x187cf8" },
+  { index = 94, target = "0x187cf8" },
+  { index = 95, target = "0x187cf8" },
+  { index = 96, target = "0x187cf8" },
+  { index = 97, target = "0x187cf8" },
+  { index = 98, target = "0x187cf8" },
+  { index = 99, target = "0x187c68" },
+  { index = 100, target = "0x187bbc" },
+  { index = 101, target = "0x187c30" },
+  { index = 102, target = "0x187c30" },
+  { index = 103, target = "0x187c30" },
+  { index = 104, target = "0x187b98" },
+  { index = 105, target = "0x187bd0" },
+  { index = 106, target = "0x187cf8" },
+  { index = 107, target = "0x187cf8" },
+  { index = 108, target = "0x187b88" },
+  { index = 109, target = "0x187cf8" },
+  { index = 110, target = "0x187c98" },
+  { index = 111, target = "0x187bec" },
+  { index = 112, target = "0x187c78" },
+  { index = 113, target = "0x187cf8" },
+  { index = 114, target = "0x187cf8" },
+  { index = 115, target = "0x187c38" },
+  { index = 116, target = "0x187cf8" },
+  { index = 117, target = "0x187c08" },
+  { index = 118, target = "0x187cf8" },
+  { index = 119, target = "0x187cf8" },
+  { index = 120, target = "0x187c20" },
+]
+
+[[jump_tables.table]]
+address = "0x58f960"
+entries = [
+  { index = 0, target = "0x1881a0" },
+  { index = 1, target = "0x188220" },
+  { index = 2, target = "0x1881a0" },
+  { index = 3, target = "0x188220" },
+  { index = 4, target = "0x188220" },
+  { index = 5, target = "0x188118" },
+  { index = 6, target = "0x188140" },
+  { index = 7, target = "0x188140" },
+  { index = 8, target = "0x188140" },
+  { index = 9, target = "0x188140" },
+  { index = 10, target = "0x188140" },
+  { index = 11, target = "0x188140" },
+  { index = 12, target = "0x188140" },
+  { index = 13, target = "0x188160" },
+  { index = 14, target = "0x188160" },
+  { index = 15, target = "0x188220" },
+  { index = 16, target = "0x188220" },
+  { index = 17, target = "0x188220" },
+  { index = 18, target = "0x188220" },
+  { index = 19, target = "0x188220" },
+  { index = 20, target = "0x188220" },
+  { index = 21, target = "0x188220" },
+  { index = 22, target = "0x188188" },
+  { index = 23, target = "0x188188" },
+  { index = 24, target = "0x188188" },
+  { index = 25, target = "0x188188" },
+  { index = 26, target = "0x188188" },
+  { index = 27, target = "0x188188" },
+  { index = 28, target = "0x188220" },
+  { index = 29, target = "0x188220" },
+  { index = 30, target = "0x188220" },
+  { index = 31, target = "0x188220" },
+  { index = 32, target = "0x188220" },
+  { index = 33, target = "0x188220" },
+  { index = 34, target = "0x188220" },
+  { index = 35, target = "0x188220" },
+  { index = 36, target = "0x188220" },
+  { index = 37, target = "0x188220" },
+  { index = 38, target = "0x188220" },
+  { index = 39, target = "0x188220" },
+  { index = 40, target = "0x188220" },
+  { index = 41, target = "0x188220" },
+  { index = 42, target = "0x188220" },
+  { index = 43, target = "0x188220" },
+  { index = 44, target = "0x188220" },
+  { index = 45, target = "0x1881b8" },
+  { index = 46, target = "0x188220" },
+  { index = 47, target = "0x188220" },
+  { index = 48, target = "0x188220" },
+  { index = 49, target = "0x188220" },
+  { index = 50, target = "0x188220" },
+  { index = 51, target = "0x188220" },
+  { index = 52, target = "0x188220" },
+  { index = 53, target = "0x188220" },
+  { index = 54, target = "0x188188" },
+  { index = 55, target = "0x188188" },
+  { index = 56, target = "0x188188" },
+  { index = 57, target = "0x188188" },
+  { index = 58, target = "0x188188" },
+  { index = 59, target = "0x188188" },
+  { index = 60, target = "0x188220" },
+  { index = 61, target = "0x188220" },
+  { index = 62, target = "0x188220" },
+  { index = 63, target = "0x188220" },
+  { index = 64, target = "0x188220" },
+  { index = 65, target = "0x188220" },
+  { index = 66, target = "0x188220" },
+  { index = 67, target = "0x188220" },
+  { index = 68, target = "0x188220" },
+  { index = 69, target = "0x188220" },
+  { index = 70, target = "0x188220" },
+  { index = 71, target = "0x188220" },
+  { index = 72, target = "0x188220" },
+  { index = 73, target = "0x188220" },
+  { index = 74, target = "0x188220" },
+  { index = 75, target = "0x188220" },
+  { index = 76, target = "0x188220" },
+  { index = 77, target = "0x1881b8" },
+]
+
+[[jump_tables.table]]
+address = "0x58faa0"
+entries = [
+  { index = 0, target = "0x1883c8" },
+  { index = 1, target = "0x188494" },
+  { index = 2, target = "0x1883c8" },
+  { index = 3, target = "0x1883e0" },
+  { index = 4, target = "0x188494" },
+  { index = 5, target = "0x1883a0" },
+  { index = 6, target = "0x1883b8" },
+  { index = 7, target = "0x1883b8" },
+  { index = 8, target = "0x1883b8" },
+  { index = 9, target = "0x1883b8" },
+  { index = 10, target = "0x1883b8" },
+  { index = 11, target = "0x1883b8" },
+  { index = 12, target = "0x1883b8" },
+  { index = 13, target = "0x1883b8" },
+  { index = 14, target = "0x1883b8" },
+  { index = 15, target = "0x188494" },
+  { index = 16, target = "0x188494" },
+  { index = 17, target = "0x188494" },
+  { index = 18, target = "0x188494" },
+  { index = 19, target = "0x188494" },
+  { index = 20, target = "0x188494" },
+  { index = 21, target = "0x188494" },
+  { index = 22, target = "0x188494" },
+  { index = 23, target = "0x188494" },
+  { index = 24, target = "0x188494" },
+  { index = 25, target = "0x188494" },
+  { index = 26, target = "0x1883f8" },
+  { index = 27, target = "0x188494" },
+  { index = 28, target = "0x188494" },
+  { index = 29, target = "0x188494" },
+  { index = 30, target = "0x188494" },
+  { index = 31, target = "0x188494" },
+  { index = 32, target = "0x188494" },
+  { index = 33, target = "0x188494" },
+  { index = 34, target = "0x188494" },
+  { index = 35, target = "0x188494" },
+  { index = 36, target = "0x188494" },
+  { index = 37, target = "0x188494" },
+  { index = 38, target = "0x188494" },
+  { index = 39, target = "0x188494" },
+  { index = 40, target = "0x188494" },
+  { index = 41, target = "0x188494" },
+  { index = 42, target = "0x188494" },
+  { index = 43, target = "0x188494" },
+  { index = 44, target = "0x188494" },
+  { index = 45, target = "0x188494" },
+  { index = 46, target = "0x188494" },
+  { index = 47, target = "0x188494" },
+  { index = 48, target = "0x188494" },
+  { index = 49, target = "0x188494" },
+  { index = 50, target = "0x188494" },
+  { index = 51, target = "0x188494" },
+  { index = 52, target = "0x188494" },
+  { index = 53, target = "0x188494" },
+  { index = 54, target = "0x188494" },
+  { index = 55, target = "0x188494" },
+  { index = 56, target = "0x188494" },
+  { index = 57, target = "0x188494" },
+  { index = 58, target = "0x1883f8" },
+]
+
+[[jump_tables.table]]
+address = "0x591d50"
+entries = [
+  { index = 0, target = "0x1e7f80" },
+  { index = 1, target = "0x1e7fa0" },
+  { index = 2, target = "0x1e7fa0" },
+  { index = 3, target = "0x1e7fa0" },
+  { index = 4, target = "0x1e84c8" },
+  { index = 5, target = "0x1e81f0" },
+  { index = 6, target = "0x1e84b0" },
+]
+
+[[jump_tables.table]]
+address = "0x5930c0"
+entries = [
+  { index = 0, target = "0x21dfa0" },
+  { index = 1, target = "0x21dfa0" },
+  { index = 2, target = "0x21dfa0" },
+  { index = 3, target = "0x21dfa0" },
+  { index = 4, target = "0x21dfa0" },
+  { index = 5, target = "0x21dfa0" },
+  { index = 6, target = "0x21dfa0" },
+  { index = 7, target = "0x21dfa0" },
+]
+
+[[jump_tables.table]]
+address = "0x5930a0"
+entries = [
+  { index = 0, target = "0x21dfc8" },
+  { index = 1, target = "0x21dfc8" },
+  { index = 2, target = "0x21dfd8" },
+  { index = 3, target = "0x21dfd8" },
+  { index = 4, target = "0x21dfe8" },
+  { index = 5, target = "0x21dfe8" },
+  { index = 6, target = "0x21dff8" },
+  { index = 7, target = "0x21dff8" },
+]
+
+[[jump_tables.table]]
+address = "0x5d1660"
+entries = [
+  { index = 0, target = "0x368a58" },
+  { index = 1, target = "0x368a68" },
+  { index = 2, target = "0x368aa8" },
+  { index = 3, target = "0x368a88" },
+  { index = 4, target = "0x368a78" },
+  { index = 5, target = "0x368a98" },
+]
+
+[[jump_tables.table]]
+address = "0x5d1860"
+entries = [
+  { index = 0, target = "0x36a640" },
+  { index = 1, target = "0x36a650" },
+  { index = 2, target = "0x36a690" },
+  { index = 3, target = "0x36a670" },
+  { index = 4, target = "0x36a660" },
+  { index = 5, target = "0x36a680" },
+]
+
+# Patches to apply during recompilation
+[patches]
+# Individual instruction patches
+# UN4Decomp: o analisador marcava 32 "possiveis codigos auto-modificaveis" e trocava as instrucoes
+# por NOP. Eram falsos positivos: escritas normais em variaveis globais (o executavel tem codigo e
+# dados no mesmo segmento). Apagar essas escritas quebrava o jogo (ex.: prioridade das threads).
+instructions = []
+
+# Performance critical functions (may need manual optimization)
+[performance]
+critical = [
+  "_start", # Uses SIMD instructions
+  "sub_00103E20", # Contains heavy loops
+  "sub_00107B90", # Uses SIMD instructions
+  "sub_0010A790", # Uses SIMD instructions
+  "sub_0010BC80", # Uses SIMD instructions
+  "sub_0010BCA0", # Uses SIMD instructions
+  "sub_0010BD20", # Uses SIMD instructions
+  "sub_0010BD50", # Uses SIMD instructions
+  "sub_0010BFA0", # Uses SIMD instructions
+  "sub_0010C180", # Uses SIMD instructions
+  "sub_0010C1D0", # Contains heavy loops
+  "sub_0010C470", # Uses SIMD instructions
+  "sub_0010C6E0", # Uses SIMD instructions
+  "sub_0010C700", # Uses SIMD instructions
+  "sub_0010E6A0", # Uses SIMD instructions
+  "sub_0010F360", # Uses SIMD instructions
+  "sub_0010F850", # Uses SIMD instructions
+  "sub_0010FDB0", # Uses SIMD instructions
+  "sub_00112020", # Contains heavy loops
+  "sub_00113B80", # Contains heavy loops
+  "__dynamic_cast", # Contains heavy loops
+  "__throw_catch_compare", # Contains heavy loops
+  "__throw", # Uses SIMD instructions
+  "__PopStackFrame__FP12ThrowContextP13ExceptionInfo", # Uses SIMD instructions
+  "sub_0011C990", # Contains heavy loops
+  "sub_00126D78", # Contains heavy loops
+  "sub_001282E0", # Uses SIMD instructions
+  "sub_001286F0", # Uses SIMD instructions
+  "sub_00128F30", # Contains heavy loops
+  "sub_0012A428", # Uses SIMD instructions
+  "sub_0013C948", # Contains heavy loops
+  "sub_0013CC28", # Contains heavy loops
+  "sub_0013D538", # Uses SIMD instructions
+  "sub_00149FC0", # Uses SIMD instructions
+  "sub_0014A190", # Uses SIMD instructions
+  "sub_0014A8B0", # Contains heavy loops
+  "sub_0014B480", # Contains heavy loops
+  "sub_0014DE50", # Uses SIMD instructions
+  "sub_001513D0", # Contains heavy loops
+  "sub_00151DB0", # Contains heavy loops
+  "sub_00152E80", # Contains heavy loops
+  "sub_00156BE8", # Uses SIMD instructions
+  "sub_00156C00", # Uses SIMD instructions
+  "sceDevVu0Pause", # Uses SIMD instructions
+  "sceDevVu0PutDBit", # Uses SIMD instructions
+  "sceDevVu0PutTBit", # Uses SIMD instructions
+  "sceDevVu0Sync", # Uses SIMD instructions
+  "sub_00156D88", # Uses SIMD instructions
+  "sub_00156D98", # Uses SIMD instructions
+  "sceDevVu0GetCnd", # Uses SIMD instructions
+  "sceDevVu0PutCnd", # Uses SIMD instructions
+  "sceVuCheckBusy", # Uses SIMD instructions
+  "sceVu0MemWriteQ", # Uses SIMD instructions
+  "sceVu0MemReadQ", # Uses SIMD instructions
+  "sub_00157138", # Uses SIMD instructions
+  "sceDevVu1Pause", # Uses SIMD instructions
+  "sceDevVu1PutDBit", # Uses SIMD instructions
+  "sceDevVu1PutTBit", # Uses SIMD instructions
+  "sceDevVu1Sync", # Uses SIMD instructions
+  "sub_001572C8", # Uses SIMD instructions
+  "sceDevVu1GetTpc", # Uses SIMD instructions
+  "sceDevVu1PutCnd", # Uses SIMD instructions
+  "_getRef0", # Uses SIMD instructions
+  "_doMC", # Uses SIMD instructions
+  "_skipMB0", # Uses SIMD instructions
+  "_copyAddRefImage", # Uses SIMD instructions
+  "_copyRefImage", # Uses SIMD instructions
+  "dmaRefImage", # Uses SIMD instructions
+  "_rix_000", # Uses SIMD instructions
+  "_ri0_000", # Uses SIMD instructions
+  "_rix_001", # Uses SIMD instructions
+  "_ri0_001", # Uses SIMD instructions
+  "_rix_010", # Uses SIMD instructions
+  "_ri0_010", # Uses SIMD instructions
+  "_rix_011", # Uses SIMD instructions
+  "_ri0_011", # Uses SIMD instructions
+  "_rix_100", # Uses SIMD instructions
+  "_ri0_100", # Uses SIMD instructions
+  "_rix_101", # Uses SIMD instructions
+  "_ri0_101", # Uses SIMD instructions
+  "_rix_110", # Uses SIMD instructions
+  "_ri0_110", # Uses SIMD instructions
+  "_rix_111", # Uses SIMD instructions
+  "_ri0_111", # Uses SIMD instructions
+  "_cpr8", # Uses SIMD instructions
+  "_sceMpegCscStoreRefImage", # Contains heavy loops
+  "_pack_header", # Contains heavy loops
+  "_PES_packet", # Contains heavy loops
+  "_sceSnprintf", # Contains heavy loops
+  "_sceCallCode", # Contains heavy loops
+  "sceLseek64", # Contains heavy loops
+  "_kTLBException", # Uses SIMD instructions
+  "_kExitTLBHandler", # Uses SIMD instructions
+  "_kDebugException", # Uses SIMD instructions
+  "sub_00170160", # Uses SIMD instructions
+  "__ieee754_fmod", # Contains heavy loops
+  "__ieee754_rem_pio2", # Contains heavy loops
+  "__kernel_rem_pio2", # Contains heavy loops
+  "__kernel_rem_pio2f", # Contains heavy loops
+  "__muldi3", # Uses SIMD instructions
+  "_send_to_iop", # Uses SIMD instructions
+  "_dtoa_r", # Contains heavy loops
+  "sub_0017F014", # Contains heavy loops
+  "__sfvwrite", # Contains heavy loops
+  "_multiply", # Uses SIMD instructions
+  "_strtod_r", # Contains heavy loops
+  "sub_001856B0", # Contains heavy loops
+  "sub_00186070", # Contains heavy loops
+  "_vfprintf_r", # Contains heavy loops
+  "__svfscanf", # Contains heavy loops
+  "__sccl", # Contains heavy loops
+  "sub_00188C70", # Uses SIMD instructions
+  "sub_0018A230", # Uses SIMD instructions
+  "sub_0018A310", # Uses SIMD instructions
+  "sub_0018A4C0", # Uses SIMD instructions
+  "sub_0018A930", # Uses SIMD instructions
+  "sub_0018AB00", # Uses SIMD instructions
+  "sub_0018ACD0", # Uses SIMD instructions
+  "sub_0018ADC0", # Uses SIMD instructions
+  "sub_0018AFC0", # Uses SIMD instructions
+  "sub_0018AFF0", # Uses SIMD instructions
+  "sub_0018BA40", # Uses SIMD instructions
+  "sub_0018BD80", # Uses SIMD instructions
+  "sub_0018C2D0", # Uses SIMD instructions
+  "sub_0018C630", # Uses SIMD instructions
+  "sub_0018CA50", # Uses SIMD instructions
+  "sub_0018CDE0", # Uses SIMD instructions
+  "sub_0018D6F0", # Contains heavy loops
+  "sub_0018E530", # Uses SIMD instructions
+  "sub_0018E7A0", # Uses SIMD instructions
+  "sub_0018EA00", # Uses SIMD instructions
+  "sub_0018F1F0", # Uses SIMD instructions
+  "sub_0018F9D0", # Uses SIMD instructions
+  "sub_001900C0", # Uses SIMD instructions
+  "sub_00190DD0", # Uses SIMD instructions
+  "sub_001912A0", # Uses SIMD instructions
+  "sub_00192330", # Uses SIMD instructions
+  "sub_001924B0", # Uses SIMD instructions
+  "sub_001929C0", # Uses SIMD instructions
+  "sub_00192A60", # Uses SIMD instructions
+  "sub_00192E30", # Uses SIMD instructions
+  "sub_00194800", # Uses SIMD instructions
+  "sub_00195CB0", # Uses SIMD instructions
+  "sub_001965A0", # Uses SIMD instructions
+  "sub_001966B0", # Uses SIMD instructions
+  "sub_001974C0", # Uses SIMD instructions
+  "sub_00198080", # Uses SIMD instructions
+  "sub_00198870", # Uses SIMD instructions
+  "sub_00199CE0", # Uses SIMD instructions
+  "sub_0019B020", # Uses SIMD instructions
+  "sub_0019B290", # Uses SIMD instructions
+  "sub_0019B530", # Uses SIMD instructions
+  "sub_0019B840", # Uses SIMD instructions
+  "sub_0019B8F0", # Uses SIMD instructions
+  "sub_0019C020", # Uses SIMD instructions
+  "sub_0019C630", # Uses SIMD instructions
+  "sub_0019CE10", # Uses SIMD instructions
+  "sub_0019CED0", # Uses SIMD instructions
+  "sub_0019CFC0", # Uses SIMD instructions
+  "sub_0019D100", # Uses SIMD instructions
+  "sub_0019D270", # Uses SIMD instructions
+  "sub_0019D3C0", # Uses SIMD instructions
+  "sub_0019D4D0", # Uses SIMD instructions
+  "sub_0019D580", # Uses SIMD instructions
+  "sub_0019D660", # Uses SIMD instructions
+  "sub_0019D7B0", # Uses SIMD instructions
+  "sub_0019D870", # Uses SIMD instructions
+  "sub_0019D9E0", # Uses SIMD instructions
+  "sub_001A0100", # Uses SIMD instructions
+  "sub_001A0B10", # Uses SIMD instructions
+  "sub_001A1520", # Uses SIMD instructions
+  "sub_001A3300", # Uses SIMD instructions
+  "sub_001A3940", # Uses SIMD instructions
+  "sub_001A3AD0", # Uses SIMD instructions
+  "sub_001A4DB0", # Uses SIMD instructions
+  "sub_001A5550", # Uses SIMD instructions
+  "sub_001A6800", # Uses SIMD instructions
+  "sub_001A6B30", # Uses SIMD instructions
+  "sub_001A7010", # Uses SIMD instructions
+  "sub_001AF2E0", # Uses SIMD instructions
+  "sub_001AF300", # Uses SIMD instructions
+  "sub_001AF890", # Contains heavy loops
+  "sub_001B0450", # Contains heavy loops
+  "sub_001B16E0", # Contains heavy loops
+  "sub_001B1DD0", # Contains heavy loops
+  "sub_001B2670", # Contains heavy loops
+  "sub_001B2900", # Contains heavy loops
+  "sub_001B2EA0", # Contains heavy loops
+  "sub_001B3660", # Contains heavy loops
+  "sub_001B60A0", # Contains heavy loops
+  "sub_001B7590", # Contains heavy loops
+  "sub_001B7CA0", # Uses SIMD instructions
+  "sub_001B99E0", # Uses SIMD instructions
+  "sub_001B9A00", # Uses SIMD instructions
+  "sub_001BD710", # Contains heavy loops
+  "sub_001BF810", # Contains heavy loops
+  "sub_001BFCC0", # Uses SIMD instructions
+  "sub_001C09E0", # Uses SIMD instructions
+  "sub_001C0C80", # Uses SIMD instructions
+  "sub_001C1030", # Uses SIMD instructions
+  "sub_001C1320", # Uses SIMD instructions
+  "sub_001C16F0", # Uses SIMD instructions
+  "sub_001C2010", # Uses SIMD instructions
+  "sub_001C2F90", # Uses SIMD instructions
+  "sub_001C3040", # Uses SIMD instructions
+  "sub_001C3120", # Uses SIMD instructions
+  "sub_001C3450", # Uses SIMD instructions
+  "sub_001C43D0", # Uses SIMD instructions
+  "sub_001C4AA0", # Uses SIMD instructions
+  "sub_001C6850", # Contains heavy loops
+  "sub_001C79B0", # Uses SIMD instructions
+  "sub_001C9B70", # Contains heavy loops
+  "sub_001CA500", # Contains heavy loops
+  "sub_001CA9A0", # Contains heavy loops
+  "sub_001CB9B0", # Uses SIMD instructions
+  "sub_001CBD50", # Uses SIMD instructions
+  "sub_001CCBE0", # Contains heavy loops
+  "sub_001CF150", # Uses SIMD instructions
+  "sub_001CF820", # Uses SIMD instructions
+  "sub_001CFF40", # Uses SIMD instructions
+  "sub_001D0380", # Contains heavy loops
+  "sub_001D1320", # Uses SIMD instructions
+  "sub_001D14D0", # Uses SIMD instructions
+  "sub_001D2180", # Uses SIMD instructions
+  "sub_001DA900", # Contains heavy loops
+  "sub_001DD0A0", # Contains heavy loops
+  "sub_001DD530", # Contains heavy loops
+  "sub_001E0E10", # Uses SIMD instructions
+  "sub_001E0E70", # Contains heavy loops
+  "sub_001E25D0", # Uses SIMD instructions
+  "sub_001E3D00", # Uses SIMD instructions
+  "sub_001E4780", # Contains heavy loops
+  "sub_001E5FD0", # Contains heavy loops
+  "sub_001E7CD0", # Contains heavy loops
+  "sub_001E8AE0", # Contains heavy loops
+  "sub_001E9770", # Contains heavy loops
+  "sub_001E9950", # Contains heavy loops
+  "sub_001EBFB0", # Uses SIMD instructions
+  "sub_001EC200", # Uses SIMD instructions
+  "sub_001EC3E0", # Uses SIMD instructions
+  "sub_001EC7F0", # Uses SIMD instructions
+  "sub_001ED730", # Uses SIMD instructions
+  "sub_001EDD50", # Uses SIMD instructions
+  "sub_001EDF70", # Uses SIMD instructions
+  "sub_001EE4E0", # Uses SIMD instructions
+  "sub_001EE8E0", # Uses SIMD instructions
+  "sub_001EF3B0", # Uses SIMD instructions
+  "sub_001EF8F0", # Uses SIMD instructions
+  "sub_001F05F0", # Uses SIMD instructions
+  "sub_001F0750", # Uses SIMD instructions
+  "sub_001F0B80", # Uses SIMD instructions
+  "sub_001F0D50", # Uses SIMD instructions
+  "sub_001F10B0", # Uses SIMD instructions
+  "sub_001F13D0", # Uses SIMD instructions
+  "sub_001F14D0", # Uses SIMD instructions
+  "sub_001F17B0", # Uses SIMD instructions
+  "sub_001F18C0", # Uses SIMD instructions
+  "sub_001F5BA0", # Uses SIMD instructions
+  "sub_001F6AE0", # Uses SIMD instructions
+  "sub_001F7740", # Uses SIMD instructions
+  "sub_001F7930", # Uses SIMD instructions
+  "sub_001F8300", # Uses SIMD instructions
+  "sub_001F8CA0", # Uses SIMD instructions
+  "sub_001F8CE0", # Uses SIMD instructions
+  "sub_001F8E40", # Uses SIMD instructions
+  "sub_001F9B30", # Uses SIMD instructions
+  "sub_001FBA30", # Uses SIMD instructions
+  "sub_001FDB90", # Uses SIMD instructions
+  "sub_002002C0", # Contains heavy loops
+  "sub_00200900", # Contains heavy loops
+  "sub_00202100", # Uses SIMD instructions
+  "sub_002031B0", # Uses SIMD instructions
+  "sub_00203C20", # Uses SIMD instructions
+  "sub_00203E60", # Uses SIMD instructions
+  "sub_00204330", # Uses SIMD instructions
+  "sub_002047E0", # Uses SIMD instructions
+  "sub_00204870", # Uses SIMD instructions
+  "sub_00204A40", # Contains heavy loops
+  "sub_00205D30", # Contains heavy loops
+  "sub_002060C0", # Uses SIMD instructions
+  "sub_002074F0", # Uses SIMD instructions
+  "sub_00207DC0", # Uses SIMD instructions
+  "sub_00208D60", # Uses SIMD instructions
+  "sub_0020C460", # Uses SIMD instructions
+  "sub_002135B0", # Uses SIMD instructions
+  "sub_00215F80", # Uses SIMD instructions
+  "sub_0021A5E0", # Uses SIMD instructions
+  "sub_0021BC60", # Uses SIMD instructions
+  "sub_00225710", # Uses SIMD instructions
+  "sub_002258E0", # Uses SIMD instructions
+  "sub_00225EA0", # Uses SIMD instructions
+  "sub_00228000", # Uses SIMD instructions
+  "sub_00228BF0", # Uses SIMD instructions
+  "sub_0022B440", # Uses SIMD instructions
+  "sub_00230710", # Uses SIMD instructions
+  "sub_00234980", # Uses SIMD instructions
+  "sub_00237820", # Uses SIMD instructions
+  "sub_00237F10", # Uses SIMD instructions
+  "sub_00238ED0", # Uses SIMD instructions
+  "sub_00239020", # Uses SIMD instructions
+  "sub_00239B20", # Uses SIMD instructions
+  "sub_0023B0C0", # Contains heavy loops
+  "sub_0023B5B0", # Contains heavy loops
+  "sub_0023C1C0", # Uses SIMD instructions
+  "sub_0023C2F0", # Uses SIMD instructions
+  "sub_0023C4A0", # Uses SIMD instructions
+  "sub_0023C6E0", # Uses SIMD instructions
+  "sub_0023C7B0", # Uses SIMD instructions
+  "sub_0023CA10", # Uses SIMD instructions
+  "sub_0023D960", # Uses SIMD instructions
+  "sub_0023F210", # Contains heavy loops
+  "sub_0023F5A0", # Uses SIMD instructions
+  "sub_00240170", # Uses SIMD instructions
+  "sub_00240350", # Uses SIMD instructions
+  "sub_00240590", # Uses SIMD instructions
+  "sub_00245010", # Uses SIMD instructions
+  "sub_0024AA20", # Uses SIMD instructions
+  "sub_0024C9A0", # Uses SIMD instructions
+  "sub_0024EDD0", # Uses SIMD instructions
+  "sub_002503A0", # Uses SIMD instructions
+  "sub_00252B60", # Uses SIMD instructions
+  "sub_00254FD0", # Uses SIMD instructions
+  "sub_00257500", # Uses SIMD instructions
+  "sub_00258090", # Uses SIMD instructions
+  "sub_00258250", # Uses SIMD instructions
+  "sub_00258450", # Uses SIMD instructions
+  "sub_002587F0", # Uses SIMD instructions
+  "sub_0025C400", # Uses SIMD instructions
+  "sub_0025DE80", # Uses SIMD instructions
+  "sub_00260980", # Uses SIMD instructions
+  "sub_00261930", # Uses SIMD instructions
+  "sub_00263180", # Uses SIMD instructions
+  "sub_00268000", # Uses SIMD instructions
+  "sub_002696E0", # Uses SIMD instructions
+  "sub_0026AE00", # Uses SIMD instructions
+  "sub_002707D0", # Uses SIMD instructions
+  "sub_002710B0", # Contains heavy loops
+  "sub_00273580", # Uses SIMD instructions
+  "sub_00275C70", # Uses SIMD instructions
+  "sub_002766D0", # Uses SIMD instructions
+  "sub_00276A40", # Uses SIMD instructions
+  "sub_002774B0", # Uses SIMD instructions
+  "sub_00279D90", # Uses SIMD instructions
+  "sub_0027DB50", # Uses SIMD instructions
+  "sub_0027E620", # Uses SIMD instructions
+  "sub_00280E60", # Uses SIMD instructions
+  "sub_00282470", # Uses SIMD instructions
+  "sub_00285640", # Uses SIMD instructions
+  "sub_00286370", # Uses SIMD instructions
+  "sub_00288990", # Uses SIMD instructions
+  "sub_0028DC60", # Uses SIMD instructions
+  "sub_00290CA0", # Uses SIMD instructions
+  "sub_00292A30", # Uses SIMD instructions
+  "sub_00292C70", # Uses SIMD instructions
+  "sub_00292FC0", # Uses SIMD instructions
+  "sub_00295D50", # Uses SIMD instructions
+  "sub_00295F60", # Uses SIMD instructions
+  "sub_00297DE0", # Uses SIMD instructions
+  "sub_00299310", # Uses SIMD instructions
+  "sub_0029A6B0", # Uses SIMD instructions
+  "sub_0029BAD0", # Uses SIMD instructions
+  "sub_0029C7D0", # Uses SIMD instructions
+  "sub_0029CA10", # Uses SIMD instructions
+  "sub_0029CC10", # Uses SIMD instructions
+  "sub_0029D0A0", # Uses SIMD instructions
+  "sub_002A08F0", # Contains heavy loops
+  "sub_002A1FE0", # Uses SIMD instructions
+  "sub_002A2280", # Uses SIMD instructions
+  "sub_002A2470", # Uses SIMD instructions
+  "sub_002A26F0", # Uses SIMD instructions
+  "sub_002A64C0", # Uses SIMD instructions
+  "sub_002A6970", # Uses SIMD instructions
+  "sub_002A6F70", # Uses SIMD instructions
+  "sub_002A71C0", # Uses SIMD instructions
+  "sub_002A7330", # Uses SIMD instructions
+  "sub_002A7750", # Uses SIMD instructions
+  "sub_002A7D00", # Uses SIMD instructions
+  "sub_002AA290", # Uses SIMD instructions
+  "sub_002AA8D0", # Uses SIMD instructions
+  "sub_002AC660", # Uses SIMD instructions
+  "sub_002B11A0", # Uses SIMD instructions
+  "sub_002B4210", # Uses SIMD instructions
+  "sub_002B5B70", # Uses SIMD instructions
+  "sub_002B5E10", # Uses SIMD instructions
+  "sub_002B60C0", # Uses SIMD instructions
+  "sub_002BA4B0", # Uses SIMD instructions
+  "sub_002BAA50", # Uses SIMD instructions
+  "sub_002BBBB0", # Uses SIMD instructions
+  "sub_002BCED0", # Uses SIMD instructions
+  "sub_002BE190", # Uses SIMD instructions
+  "sub_002BF9B0", # Uses SIMD instructions
+  "sub_002C0530", # Uses SIMD instructions
+  "sub_002C20D0", # Uses SIMD instructions
+  "sub_002C2390", # Uses SIMD instructions
+  "sub_002C33F0", # Uses SIMD instructions
+  "sub_002C37D0", # Uses SIMD instructions
+  "sub_002C3BE0", # Uses SIMD instructions
+  "sub_002C4E90", # Uses SIMD instructions
+  "sub_002C6B90", # Uses SIMD instructions
+  "sub_002C8E30", # Uses SIMD instructions
+  "sub_002C9B70", # Uses SIMD instructions
+  "sub_002CA880", # Uses SIMD instructions
+  "sub_002CBBF0", # Uses SIMD instructions
+  "sub_002CFB20", # Contains heavy loops
+  "sub_002D16D0", # Uses SIMD instructions
+  "sub_002D2350", # Uses SIMD instructions
+  "sub_002D2760", # Uses SIMD instructions
+  "sub_002D31B0", # Uses SIMD instructions
+  "sub_002D3CA0", # Uses SIMD instructions
+  "sub_002D41B0", # Uses SIMD instructions
+  "sub_002D4590", # Uses SIMD instructions
+  "sub_002D4FE0", # Uses SIMD instructions
+  "sub_002D59C0", # Uses SIMD instructions
+  "sub_002D6010", # Contains heavy loops
+  "sub_002D7970", # Uses SIMD instructions
+  "sub_002D7AE0", # Uses SIMD instructions
+  "sub_002D9200", # Uses SIMD instructions
+  "sub_002D9B00", # Uses SIMD instructions
+  "sub_002D9C50", # Uses SIMD instructions
+  "sub_002DA560", # Contains heavy loops
+  "sub_002DAEA0", # Uses SIMD instructions
+  "sub_002DB9C0", # Uses SIMD instructions
+  "sub_002DC0A0", # Uses SIMD instructions
+  "sub_002DCD70", # Uses SIMD instructions
+  "sub_002DD510", # Uses SIMD instructions
+  "sub_002DD9D0", # Uses SIMD instructions
+  "sub_002DE250", # Uses SIMD instructions
+  "sub_002DE7F0", # Uses SIMD instructions
+  "sub_002DEF70", # Uses SIMD instructions
+  "sub_002DF890", # Uses SIMD instructions
+  "sub_002E0360", # Uses SIMD instructions
+  "sub_002E09C0", # Uses SIMD instructions
+  "sub_002E1010", # Uses SIMD instructions
+  "sub_002E2160", # Uses SIMD instructions
+  "sub_002E2F70", # Contains heavy loops
+  "sub_002E37F0", # Uses SIMD instructions
+  "sub_002E3A50", # Uses SIMD instructions
+  "sub_002E5A60", # Uses SIMD instructions
+  "sub_002E6100", # Uses SIMD instructions
+  "sub_002E6C40", # Uses SIMD instructions
+  "sub_002E72C0", # Uses SIMD instructions
+  "sub_002E7A10", # Uses SIMD instructions
+  "sub_002E84F0", # Uses SIMD instructions
+  "sub_002E8F40", # Uses SIMD instructions
+  "sub_002E9660", # Uses SIMD instructions
+  "sub_002E9BB0", # Uses SIMD instructions
+  "sub_002EA5A0", # Uses SIMD instructions
+  "sub_002EAA20", # Uses SIMD instructions
+  "sub_002EB1A0", # Uses SIMD instructions
+  "sub_002EB750", # Uses SIMD instructions
+  "sub_002ECA10", # Uses SIMD instructions
+  "sub_002ED250", # Uses SIMD instructions
+  "sub_002EDCC0", # Uses SIMD instructions
+  "sub_002EDD30", # Uses SIMD instructions
+  "sub_002EDF50", # Uses SIMD instructions
+  "sub_002EE0F0", # Uses SIMD instructions
+  "sub_002EE8A0", # Uses SIMD instructions
+  "sub_002EE9A0", # Uses SIMD instructions
+  "sub_002EF4A0", # Uses SIMD instructions
+  "sub_002F0CF0", # Uses SIMD instructions
+  "sub_002F25F0", # Uses SIMD instructions
+  "sub_002F3330", # Uses SIMD instructions
+  "sub_002F5740", # Uses SIMD instructions
+  "sub_002F63F0", # Uses SIMD instructions
+  "sub_002F86A0", # Uses SIMD instructions
+  "sub_002F9380", # Uses SIMD instructions
+  "sub_002F9C40", # Uses SIMD instructions
+  "sub_002FA580", # Uses SIMD instructions
+  "sub_002FB2F0", # Uses SIMD instructions
+  "sub_002FB550", # Uses SIMD instructions
+  "sub_002FC6A0", # Uses SIMD instructions
+  "sub_002FD380", # Uses SIMD instructions
+  "sub_002FE0E0", # Uses SIMD instructions
+  "sub_002FE670", # Uses SIMD instructions
+  "sub_002FE9D0", # Uses SIMD instructions
+  "sub_002FEA00", # Uses SIMD instructions
+  "sub_002FEC80", # Uses SIMD instructions
+  "sub_002FF230", # Uses SIMD instructions
+  "sub_002FF5D0", # Uses SIMD instructions
+  "sub_002FFC30", # Uses SIMD instructions
+  "sub_003000C0", # Uses SIMD instructions
+  "sub_003001A0", # Uses SIMD instructions
+  "sub_00300710", # Uses SIMD instructions
+  "sub_00300A00", # Uses SIMD instructions
+  "sub_00300B30", # Uses SIMD instructions
+  "sub_00301310", # Uses SIMD instructions
+  "sub_00301580", # Uses SIMD instructions
+  "sub_00301720", # Uses SIMD instructions
+  "sub_003017F0", # Uses SIMD instructions
+  "sub_00301B90", # Uses SIMD instructions
+  "sub_00301F90", # Uses SIMD instructions
+  "sub_003023D0", # Uses SIMD instructions
+  "sub_00302AD0", # Uses SIMD instructions
+  "sub_00303540", # Uses SIMD instructions
+  "sub_00303670", # Uses SIMD instructions
+  "sub_003039E0", # Uses SIMD instructions
+  "sub_00304200", # Uses SIMD instructions
+  "sub_00304480", # Uses SIMD instructions
+  "sub_003048C0", # Uses SIMD instructions
+  "sub_00304B50", # Uses SIMD instructions
+  "sub_00304D50", # Uses SIMD instructions
+  "sub_00305060", # Uses SIMD instructions
+  "sub_00305380", # Uses SIMD instructions
+  "sub_00305670", # Uses SIMD instructions
+  "sub_00305E50", # Uses SIMD instructions
+  "sub_00307130", # Uses SIMD instructions
+  "sub_00307400", # Uses SIMD instructions
+  "sub_003075D0", # Uses SIMD instructions
+  "sub_00307770", # Uses SIMD instructions
+  "sub_00307E20", # Uses SIMD instructions
+  "sub_003080D0", # Uses SIMD instructions
+  "sub_00308350", # Uses SIMD instructions
+  "sub_00308740", # Uses SIMD instructions
+  "sub_00308D60", # Uses SIMD instructions
+  "sub_00308E80", # Uses SIMD instructions
+  "sub_00308F70", # Uses SIMD instructions
+  "sub_00309080", # Uses SIMD instructions
+  "sub_00309300", # Uses SIMD instructions
+  "sub_00309C30", # Uses SIMD instructions
+  "sub_0030A9E0", # Uses SIMD instructions
+  "sub_0030AE10", # Uses SIMD instructions
+  "sub_0030B300", # Uses SIMD instructions
+  "sub_0030B7C0", # Uses SIMD instructions
+  "sub_0030BD20", # Uses SIMD instructions
+  "sub_0030C210", # Uses SIMD instructions
+  "sub_0030C6F0", # Uses SIMD instructions
+  "sub_0030D0E0", # Uses SIMD instructions
+  "sub_0030D600", # Uses SIMD instructions
+  "sub_0030DFC0", # Uses SIMD instructions
+  "sub_0030E630", # Uses SIMD instructions
+  "sub_0030F1B0", # Uses SIMD instructions
+  "sub_0030F6D0", # Uses SIMD instructions
+  "sub_00310140", # Uses SIMD instructions
+  "sub_00310670", # Uses SIMD instructions
+  "sub_003110F0", # Uses SIMD instructions
+  "sub_00311650", # Uses SIMD instructions
+  "sub_003125E0", # Uses SIMD instructions
+  "sub_00316810", # Contains heavy loops
+  "sub_0031B400", # Contains heavy loops
+  "sub_0031F4D0", # Uses SIMD instructions
+  "sub_00321CB0", # Uses SIMD instructions
+  "sub_003266C0", # Uses SIMD instructions
+  "sub_00326AB0", # Uses SIMD instructions
+  "sub_00327310", # Uses SIMD instructions
+  "sub_00327400", # Uses SIMD instructions
+  "sub_00327EB0", # Uses SIMD instructions
+  "sub_00328440", # Uses SIMD instructions
+  "sub_00328B10", # Uses SIMD instructions
+  "sub_0032D440", # Contains heavy loops
+  "sub_0032E030", # Uses SIMD instructions
+  "sub_0032F200", # Uses SIMD instructions
+  "sub_0032FFC0", # Uses SIMD instructions
+  "sub_00331DC0", # Uses SIMD instructions
+  "sub_00332220", # Uses SIMD instructions
+  "sub_00332340", # Uses SIMD instructions
+  "sub_003324D0", # Uses SIMD instructions
+  "sub_003325F0", # Uses SIMD instructions
+  "sub_00333400", # Uses SIMD instructions
+  "sub_00333A20", # Uses SIMD instructions
+  "sub_003342E0", # Uses SIMD instructions
+  "sub_00334E50", # Uses SIMD instructions
+  "sub_00337B50", # Uses SIMD instructions
+  "sub_00338380", # Uses SIMD instructions
+  "sub_0033AA10", # Contains heavy loops
+  "sub_00342D40", # Uses SIMD instructions
+  "sub_00344200", # Uses SIMD instructions
+  "sub_003446D0", # Uses SIMD instructions
+  "sub_00347AB0", # Uses SIMD instructions
+  "sub_00348BC0", # Uses SIMD instructions
+  "sub_0034AE60", # Uses SIMD instructions
+  "sub_0034B320", # Uses SIMD instructions
+  "sub_0034B8D0", # Uses SIMD instructions
+  "sub_0034CB20", # Uses SIMD instructions
+  "sub_0034D0C0", # Uses SIMD instructions
+  "sub_0034D160", # Uses SIMD instructions
+  "sub_0034D5B0", # Uses SIMD instructions
+  "sub_0034EA90", # Uses SIMD instructions
+  "sub_0034F790", # Uses SIMD instructions
+  "sub_0034FE80", # Uses SIMD instructions
+  "sub_00350300", # Uses SIMD instructions
+  "sub_00350AF0", # Uses SIMD instructions
+  "sub_00350D00", # Uses SIMD instructions
+  "sub_003524B0", # Uses SIMD instructions
+  "sub_00354840", # Uses SIMD instructions
+  "sub_003548E0", # Uses SIMD instructions
+  "sub_00355030", # Uses SIMD instructions
+  "sub_003550D0", # Uses SIMD instructions
+  "sub_00355270", # Uses SIMD instructions
+  "sub_00356D60", # Uses SIMD instructions
+  "sub_00359AA0", # Uses SIMD instructions
+  "sub_0035C220", # Uses SIMD instructions
+  "sub_0035DDB0", # Uses SIMD instructions
+  "sub_0035E5F0", # Uses SIMD instructions
+  "sub_0035F130", # Uses SIMD instructions
+  "sub_0035F370", # Uses SIMD instructions
+  "sub_0035F5D0", # Uses SIMD instructions
+  "sub_003600C0", # Uses SIMD instructions
+  "sub_00360530", # Uses SIMD instructions
+  "sub_00360EF0", # Uses SIMD instructions
+  "sub_003621A0", # Uses SIMD instructions
+  "sub_00362A50", # Uses SIMD instructions
+  "sub_00362F40", # Uses SIMD instructions
+  "sub_00363650", # Uses SIMD instructions
+  "sub_003645F0", # Uses SIMD instructions
+  "sub_00367F60", # Contains heavy loops
+  "sub_00368140", # Contains heavy loops
+  "sub_00369CD0", # Contains heavy loops
+  "sub_0036A210", # Contains heavy loops
+  "sub_0036AFA0", # Contains heavy loops
+  "sub_0036C1E0", # Uses SIMD instructions
+  "sub_0036C5B0", # Contains heavy loops
+  "sub_0036CAA0", # Uses SIMD instructions
+  "sub_0036CD00", # Uses SIMD instructions
+  "sub_00374E40", # Contains heavy loops
+  "sub_0037A320", # Uses SIMD instructions
+  "sub_0037B670", # Uses SIMD instructions
+  "sub_0037B8E0", # Uses SIMD instructions
+  "sub_0037C870", # Uses SIMD instructions
+  "sub_0037DE80", # Uses SIMD instructions
+  "sub_003804C0", # Uses SIMD instructions
+  "sub_00381F70", # Uses SIMD instructions
+  "sub_003841A0", # Uses SIMD instructions
+  "sub_00386130", # Uses SIMD instructions
+  "sub_00386710", # Uses SIMD instructions
+  "sub_00388000", # Uses SIMD instructions
+  "sub_003885D0", # Uses SIMD instructions
+  "sub_0038CC90", # Uses SIMD instructions
+  "sub_0038ECD0", # Contains heavy loops
+  "sub_00394300", # Uses SIMD instructions
+  "sub_003954F0", # Uses SIMD instructions
+  "sub_00395660", # Uses SIMD instructions
+  "sub_00396A90", # Contains heavy loops
+  "sub_00399900", # Contains heavy loops
+  "sub_0039B960", # Contains heavy loops
+  "sub_0039C540", # Uses SIMD instructions
+  "sub_0039DC00", # Uses SIMD instructions
+  "sub_0039EB00", # Uses SIMD instructions
+  "sub_0039F860", # Uses SIMD instructions
+  "sub_003A01A0", # Uses SIMD instructions
+  "sub_003A0590", # Uses SIMD instructions
+  "sub_003A07D0", # Uses SIMD instructions
+  "sub_003A11D0", # Uses SIMD instructions
+  "sub_003A2550", # Uses SIMD instructions
+  "sub_003A2A50", # Uses SIMD instructions
+  "sub_003A3720", # Uses SIMD instructions
+  "sub_003A4EA0", # Uses SIMD instructions
+  "sub_003A54E0", # Uses SIMD instructions
+  "sub_003A68D0", # Uses SIMD instructions
+  "sub_003A96E0", # Uses SIMD instructions
+  "sub_003AA670", # Uses SIMD instructions
+  "sub_003AAA70", # Uses SIMD instructions
+  "sub_003AB4A0", # Uses SIMD instructions
+  "sub_003AC570", # Uses SIMD instructions
+  "sub_003AD8B0", # Uses SIMD instructions
+  "sub_003ADDD0", # Uses SIMD instructions
+  "sub_003AEC10", # Uses SIMD instructions
+  "sub_003AF750", # Uses SIMD instructions
+  "sub_003AFBC0", # Uses SIMD instructions
+  "sub_003AFE90", # Uses SIMD instructions
+  "sub_003B07F0", # Uses SIMD instructions
+  "sub_003B0960", # Uses SIMD instructions
+  "sub_003B1AA0", # Contains heavy loops
+  "sub_003B1D10", # Uses SIMD instructions
+  "sub_003B36F0", # Uses SIMD instructions
+  "sub_003B39E0", # Uses SIMD instructions
+  "sub_003B5220", # Contains heavy loops
+  "sub_003B6070", # Uses SIMD instructions
+  "sub_003B73F0", # Uses SIMD instructions
+  "sub_003B7640", # Uses SIMD instructions
+  "sub_003B7A00", # Uses SIMD instructions
+  "sub_003B7E50", # Uses SIMD instructions
+  "sub_003B7F10", # Uses SIMD instructions
+  "sub_003BA400", # Uses SIMD instructions
+  "sub_003BAC00", # Uses SIMD instructions
+  "sub_003BFE80", # Uses SIMD instructions
+  "sub_003C0950", # Uses SIMD instructions
+  "sub_003C0AA0", # Uses SIMD instructions
+  "sub_003C2420", # Uses SIMD instructions
+  "sub_003C2CD0", # Uses SIMD instructions
+  "sub_003C4310", # Uses SIMD instructions
+  "sub_003C4C60", # Uses SIMD instructions
+  "sub_003C5550", # Uses SIMD instructions
+  "sub_003C7FD0", # Uses SIMD instructions
+  "sub_003C8900", # Uses SIMD instructions
+  "sub_003C8CA0", # Uses SIMD instructions
+  "sub_003C92C0", # Uses SIMD instructions
+  "sub_003C9610", # Uses SIMD instructions
+  "sub_003C97F0", # Uses SIMD instructions
+  "sub_003C9940", # Uses SIMD instructions
+  "sub_003CD2A0", # Uses SIMD instructions
+  "sub_003CD800", # Uses SIMD instructions
+  "sub_003CE150", # Uses SIMD instructions
+  "sub_003CF650", # Uses SIMD instructions
+  "sub_003D0B70", # Contains heavy loops
+  "sub_003D1830", # Uses SIMD instructions
+  "sub_003D1DB0", # Uses SIMD instructions
+  "sub_003D2FE0", # Contains heavy loops
+  "sub_003D4F90", # Contains heavy loops
+  "sub_003D6530", # Uses SIMD instructions
+  "sub_003DB240", # Uses SIMD instructions
+  "sub_003DB970", # Uses SIMD instructions
+  "sub_003DC270", # Uses SIMD instructions
+  "sub_003DCAA0", # Uses SIMD instructions
+  "sub_003DEBC0", # Uses SIMD instructions
+  "sub_003DF0D0", # Uses SIMD instructions
+  "sub_003DFF70", # Uses SIMD instructions
+  "sub_003E0DF0", # Uses SIMD instructions
+  "sub_003E1420", # Uses SIMD instructions
+  "sub_003E1A30", # Uses SIMD instructions
+  "sub_003E2110", # Uses SIMD instructions
+  "sub_003E2370", # Uses SIMD instructions
+  "sub_003E2C10", # Uses SIMD instructions
+  "sub_003E3220", # Uses SIMD instructions
+  "sub_003E3450", # Uses SIMD instructions
+  "sub_003E4300", # Uses SIMD instructions
+  "sub_003E7DF0", # Contains heavy loops
+  "sub_003EDF20", # Uses SIMD instructions
+  "sub_003EE0A0", # Uses SIMD instructions
+  "sub_003EE6E0", # Uses SIMD instructions
+  "sub_003F1690", # Uses SIMD instructions
+  "sub_003F17F0", # Uses SIMD instructions
+  "sub_003F1810", # Uses SIMD instructions
+  "sub_003F1A80", # Uses SIMD instructions
+  "sub_003F22C0", # Uses SIMD instructions
+  "sub_003F2390", # Uses SIMD instructions
+  "sub_003F24D0", # Uses SIMD instructions
+  "sub_003F5B20", # Uses SIMD instructions
+  "sub_004095E0", # Uses SIMD instructions
+  "sub_00409A30", # Uses SIMD instructions
+  "sub_0042FAC0", # Uses SIMD instructions
+  "sub_0042FD08", # Uses SIMD instructions
+  "sub_00430378", # Contains heavy loops
+  "sub_00430B40", # Uses SIMD instructions
+  "sub_005867E8", # Uses SIMD instructions
+  "sub_00586928", # Uses SIMD instructions
+  "sub_00586950", # Uses SIMD instructions
+  "sub_00586998", # Uses SIMD instructions
+  "sub_005869B0", # Uses SIMD instructions
+  "sub_005869C8", # Uses SIMD instructions
+  "sub_0058A858", # Uses SIMD instructions
+  "sub_0058BD68", # Uses SIMD instructions
+  "sub_0058BDA0", # Uses SIMD instructions
+  "sub_0058BE10", # Uses SIMD instructions
+  "sub_0058BE50", # Uses SIMD instructions
+  "sub_0058BEB0", # Uses SIMD instructions
+  "sub_0058BF70", # Uses SIMD instructions
+  "sub_0058BFB0", # Uses SIMD instructions
+  "sub_0058BFE0", # Uses SIMD instructions
+  "sub_0058C008", # Uses SIMD instructions
+  "sub_0058C0B0", # Uses SIMD instructions
+  "sub_0058C0D8", # Uses SIMD instructions
+  "sub_0058C238", # Uses SIMD instructions
+  "sub_0058C268", # Uses SIMD instructions
+  "sub_0058C298", # Uses SIMD instructions
+  "sub_0058C2E8", # Uses SIMD instructions
+  "sub_0058C3E0", # Uses SIMD instructions
+  "sub_0058C410", # Uses SIMD instructions
+  "sub_0058C590", # Uses SIMD instructions
+  "sub_0058CC30", # Uses SIMD instructions
+  "sub_0058D138", # Uses SIMD instructions
+  "sub_0058D160", # Uses SIMD instructions
+  "sub_0058D178", # Uses SIMD instructions
+  "sub_0058D198", # Uses SIMD instructions
+  "sub_0058D1B8", # Uses SIMD instructions
+  "sub_0058D1E8", # Uses SIMD instructions
+  "sub_0058D208", # Uses SIMD instructions
+  "sub_0058D268", # Uses SIMD instructions
+  "sub_0058D2A8", # Uses SIMD instructions
+  "sub_0058D2D0", # Uses SIMD instructions
+  "sub_0058D2F0", # Uses SIMD instructions
+  "sub_0058D990", # Uses SIMD instructions
+  "sub_0058D9A0", # Uses SIMD instructions
+  "sub_0058D9B0", # Uses SIMD instructions
+  "sub_0058DA78", # Uses SIMD instructions
+  "sub_0058DB98", # Uses SIMD instructions
+  "sub_0058DC58", # Uses SIMD instructions
+  "sub_0058EDD0", # Uses SIMD instructions
+  "sub_0058F150", # Uses SIMD instructions
+  "sub_00590CE0", # Uses SIMD instructions
+  "sub_00590CF0", # Uses SIMD instructions
+  "sub_00591D70", # Uses SIMD instructions
+  "sub_00592760", # Uses SIMD instructions
+  "sub_00593E30", # Uses SIMD instructions
+  "sub_00593EB0", # Uses SIMD instructions
+  "sub_00593F30", # Uses SIMD instructions
+  "sub_00593F40", # Uses SIMD instructions
+  "sub_00593F70", # Uses SIMD instructions
+  "sub_00593F90", # Uses SIMD instructions
+  "sub_00593FC8", # Uses SIMD instructions
+  "sub_00593FE0", # Uses SIMD instructions
+  "sub_00594020", # Uses SIMD instructions
+  "sub_00594050", # Uses SIMD instructions
+  "sub_005940C0", # Uses SIMD instructions
+  "sub_00594100", # Uses SIMD instructions
+  "sub_00594120", # Uses SIMD instructions
+  "sub_00594180", # Uses SIMD instructions
+  "sub_005941A0", # Uses SIMD instructions
+  "sub_00594220", # Uses SIMD instructions
+  "sub_00594288", # Uses SIMD instructions
+  "sub_00594298", # Uses SIMD instructions
+  "sub_005942C0", # Uses SIMD instructions
+  "sub_005942E0", # Uses SIMD instructions
+  "sub_00594340", # Uses SIMD instructions
+  "sub_00594370", # Uses SIMD instructions
+  "sub_005943B0", # Uses SIMD instructions
+  "sub_00594458", # Uses SIMD instructions
+  "sub_00594488", # Uses SIMD instructions
+  "sub_00594498", # Uses SIMD instructions
+  "sub_005944E0", # Uses SIMD instructions
+  "sub_00594508", # Uses SIMD instructions
+  "sub_00594518", # Uses SIMD instructions
+  "sub_00594530", # Uses SIMD instructions
+  "sub_00594550", # Uses SIMD instructions
+  "sub_00594570", # Uses SIMD instructions
+  "sub_005945C0", # Uses SIMD instructions
+  "sub_005945F8", # Uses SIMD instructions
+  "sub_005946A0", # Uses SIMD instructions
+  "sub_005946C0", # Uses SIMD instructions
+  "sub_00594700", # Uses SIMD instructions
+  "sub_00594748", # Uses SIMD instructions
+  "sub_00594760", # Uses SIMD instructions
+  "sub_00594780", # Uses SIMD instructions
+  "sub_005947A0", # Uses SIMD instructions
+  "sub_005947E0", # Uses SIMD instructions
+  "sub_00594800", # Uses SIMD instructions
+  "sub_00594850", # Uses SIMD instructions
+  "sub_00594880", # Uses SIMD instructions
+  "sub_005948A0", # Uses SIMD instructions
+  "sub_005948C0", # Uses SIMD instructions
+  "sub_005948E0", # Uses SIMD instructions
+  "sub_00594960", # Uses SIMD instructions
+  "sub_005949C0", # Uses SIMD instructions
+  "sub_00594A20", # Uses SIMD instructions
+  "sub_00594A40", # Uses SIMD instructions
+  "sub_00594A60", # Uses SIMD instructions
+  "sub_00594AC0", # Uses SIMD instructions
+  "sub_00594AF0", # Uses SIMD instructions
+  "sub_00594B08", # Uses SIMD instructions
+  "sub_00594B30", # Uses SIMD instructions
+  "sub_00594B40", # Uses SIMD instructions
+  "sub_00594B50", # Uses SIMD instructions
+  "sub_00594B68", # Uses SIMD instructions
+  "sub_00594B78", # Uses SIMD instructions
+  "sub_00594B98", # Uses SIMD instructions
+  "sub_00594BA8", # Uses SIMD instructions
+  "sub_00594C10", # Uses SIMD instructions
+  "sub_00594C50", # Uses SIMD instructions
+  "sub_00594C78", # Uses SIMD instructions
+  "sub_00594D30", # Uses SIMD instructions
+  "sub_00594D60", # Uses SIMD instructions
+  "sub_00594DD0", # Uses SIMD instructions
+  "sub_00594E40", # Uses SIMD instructions
+  "sub_00594E60", # Uses SIMD instructions
+  "sub_00594E80", # Uses SIMD instructions
+  "sub_00594EE0", # Uses SIMD instructions
+  "sub_00594F10", # Uses SIMD instructions
+  "sub_00596910", # Uses SIMD instructions
+  "sub_00596920", # Uses SIMD instructions
+  "sub_00596960", # Uses SIMD instructions
+  "sub_00596970", # Uses SIMD instructions
+  "sub_005969B0", # Uses SIMD instructions
+  "sub_005969D0", # Uses SIMD instructions
+  "sub_00596A20", # Uses SIMD instructions
+  "sub_00596A60", # Uses SIMD instructions
+  "sub_00596A70", # Uses SIMD instructions
+  "sub_00596A90", # Uses SIMD instructions
+  "sub_00596AB0", # Uses SIMD instructions
+  "sub_00596AC8", # Uses SIMD instructions
+  "sub_00596AF0", # Uses SIMD instructions
+  "sub_00596B10", # Uses SIMD instructions
+  "sub_00596B20", # Uses SIMD instructions
+  "sub_00596BA0", # Uses SIMD instructions
+  "sub_00596BF0", # Uses SIMD instructions
+  "sub_00596C10", # Uses SIMD instructions
+  "sub_00596C70", # Uses SIMD instructions
+  "sub_00596CA0", # Uses SIMD instructions
+  "sub_00596CC0", # Uses SIMD instructions
+  "sub_00596D20", # Uses SIMD instructions
+  "sub_00596D40", # Uses SIMD instructions
+  "sub_00596DB0", # Uses SIMD instructions
+  "sub_00596DD0", # Uses SIMD instructions
+  "sub_00596E20", # Uses SIMD instructions
+  "sub_00596E40", # Uses SIMD instructions
+  "sub_00596E60", # Uses SIMD instructions
+  "sub_00596E78", # Uses SIMD instructions
+  "sub_00596EB0", # Uses SIMD instructions
+  "sub_00596F30", # Uses SIMD instructions
+  "sub_00596F50", # Uses SIMD instructions
+  "sub_00596FD0", # Uses SIMD instructions
+  "sub_00597008", # Uses SIMD instructions
+  "sub_00597020", # Uses SIMD instructions
+  "sub_00597038", # Uses SIMD instructions
+  "sub_00597050", # Uses SIMD instructions
+  "sub_00597080", # Uses SIMD instructions
+  "sub_005970A0", # Uses SIMD instructions
+  "sub_005970D8", # Uses SIMD instructions
+  "sub_005970E8", # Uses SIMD instructions
+  "sub_00597138", # Uses SIMD instructions
+  "sub_00597158", # Uses SIMD instructions
+  "sub_00597170", # Uses SIMD instructions
+  "sub_005971C0", # Uses SIMD instructions
+  "sub_00597240", # Uses SIMD instructions
+  "sub_00597290", # Uses SIMD instructions
+  "sub_005972D8", # Uses SIMD instructions
+  "sub_005972E8", # Uses SIMD instructions
+  "sub_005972F8", # Uses SIMD instructions
+  "sub_00597310", # Uses SIMD instructions
+  "sub_00597350", # Uses SIMD instructions
+  "sub_00597390", # Uses SIMD instructions
+  "sub_005973D8", # Uses SIMD instructions
+  "sub_005973F0", # Uses SIMD instructions
+  "sub_00597430", # Uses SIMD instructions
+  "sub_00597470", # Uses SIMD instructions
+  "sub_00597500", # Uses SIMD instructions
+  "sub_00597540", # Uses SIMD instructions
+  "sub_00597570", # Uses SIMD instructions
+  "sub_00597660", # Uses SIMD instructions
+  "sub_005976F0", # Uses SIMD instructions
+  "sub_005977E0", # Uses SIMD instructions
+  "sub_00597810", # Uses SIMD instructions
+  "sub_00597840", # Uses SIMD instructions
+  "sub_00597870", # Uses SIMD instructions
+  "sub_00597898", # Uses SIMD instructions
+  "sub_005978B0", # Uses SIMD instructions
+  "sub_00597920", # Uses SIMD instructions
+  "sub_00597950", # Uses SIMD instructions
+  "sub_00597990", # Uses SIMD instructions
+  "sub_005979B0", # Uses SIMD instructions
+  "sub_005979D0", # Uses SIMD instructions
+  "sub_00597A30", # Uses SIMD instructions
+  "sub_00597AC0", # Uses SIMD instructions
+  "sub_00597B10", # Uses SIMD instructions
+  "sub_00597BC0", # Uses SIMD instructions
+  "sub_00597BD8", # Uses SIMD instructions
+  "sub_00597BF0", # Uses SIMD instructions
+  "sub_00597C20", # Uses SIMD instructions
+  "sub_00597C70", # Uses SIMD instructions
+  "sub_00597C90", # Uses SIMD instructions
+  "sub_0059FE30", # Uses SIMD instructions
+  "sub_005A0D90", # Uses SIMD instructions
+  "sub_005A0E20", # Uses SIMD instructions
+  "sub_005A5408", # Uses SIMD instructions
+  "sub_005A5458", # Uses SIMD instructions
+  "sub_005A5E20", # Uses SIMD instructions
+  "sub_005A6DD0", # Uses SIMD instructions
+  "sub_005A6E68", # Uses SIMD instructions
+  "sub_005AD820", # Uses SIMD instructions
+  "sub_005AEE30", # Uses SIMD instructions
+  "sub_005AEED8", # Uses SIMD instructions
+  "sub_005B2400", # Uses SIMD instructions
+  "sub_005B5850", # Uses SIMD instructions
+  "sub_005B73E0", # Uses SIMD instructions
+  "sub_005B7464", # Uses SIMD instructions
+  "sub_005B7DB0", # Uses SIMD instructions
+  "sub_005B8DC8", # Uses SIMD instructions
+  "sub_005B9660", # Uses SIMD instructions
+  "sub_005B9678", # Uses SIMD instructions
+  "sub_005B9710", # Uses SIMD instructions
+  "sub_005BA070", # Uses SIMD instructions
+  "sub_005BA7E0", # Uses SIMD instructions
+  "sub_005BA820", # Uses SIMD instructions
+  "sub_005BAA10", # Uses SIMD instructions
+  "sub_005BAA30", # Uses SIMD instructions
+  "sub_005C0D00", # Uses SIMD instructions
+  "sub_005C0D30", # Uses SIMD instructions
+  "sub_005C2870", # Uses SIMD instructions
+  "sub_005C3320", # Uses SIMD instructions
+  "sub_005C3338", # Uses SIMD instructions
+  "sub_005C3350", # Uses SIMD instructions
+  "sub_005C3370", # Uses SIMD instructions
+  "sub_005C3418", # Uses SIMD instructions
+  "sub_005C3438", # Uses SIMD instructions
+  "sub_005C35A0", # Uses SIMD instructions
+  "sub_005C3A18", # Uses SIMD instructions
+  "sub_005C3C40", # Uses SIMD instructions
+  "sub_005C5CA8", # Uses SIMD instructions
+  "sub_005C5DC0", # Uses SIMD instructions
+  "sub_005C5E78", # Uses SIMD instructions
+  "sub_005C6178", # Uses SIMD instructions
+  "sub_005CD940", # Uses SIMD instructions
+  "sub_005CD9A0", # Uses SIMD instructions
+  "sub_005D12D0", # Uses SIMD instructions
+  "sub_005D1410", # Uses SIMD instructions
+  "sub_005D1438", # Uses SIMD instructions
+  "sub_005D15F8", # Uses SIMD instructions
+  "sub_005D2700", # Uses SIMD instructions
+  "sub_005D28B0", # Uses SIMD instructions
+  "sub_005D3878", # Uses SIMD instructions
+  "sub_005D3930", # Uses SIMD instructions
+  "sub_005D39B0", # Uses SIMD instructions
+  "sub_005D3BE0", # Uses SIMD instructions
+  "sub_005D3C00", # Uses SIMD instructions
+  "sub_005D3C20", # Uses SIMD instructions
+  "sub_005D3CD8", # Uses SIMD instructions
+  "sub_005D3E38", # Uses SIMD instructions
+  "sub_005D3FB8", # Uses SIMD instructions
+  "sub_005D4348", # Uses SIMD instructions
+  "sub_005D4478", # Uses SIMD instructions
+  "sub_005D4520", # Uses SIMD instructions
+  "sub_005D5760", # Uses SIMD instructions
+  "sub_005D57A0", # Uses SIMD instructions
+  "sub_005D57B0", # Uses SIMD instructions
+  "sub_005D57D0", # Uses SIMD instructions
+  "sub_005D57E0", # Uses SIMD instructions
+  "sub_005D5A58", # Uses SIMD instructions
+  "sub_005D5CA8", # Uses SIMD instructions
+  "sub_005D5CC0", # Uses SIMD instructions
+  "sub_005D5D08", # Uses SIMD instructions
+  "sub_005D5D18", # Uses SIMD instructions
+  "sub_005D5E28", # Uses SIMD instructions
+  "sub_005D5E38", # Uses SIMD instructions
+  "sub_005D5E48", # Uses SIMD instructions
+  "sub_005D5E60", # Uses SIMD instructions
+  "sub_005D5F58", # Uses SIMD instructions
+  "sub_005D5F98", # Uses SIMD instructions
+  "sub_005D5FA0", # Uses SIMD instructions
+  "sub_005D6180", # Uses SIMD instructions
+  "sub_005D61B0", # Uses SIMD instructions
+  "sub_005D6440", # Uses SIMD instructions
+  "sub_005D6890", # Uses SIMD instructions
+  "sub_005D68D8", # Uses SIMD instructions
+  "sub_005D69D8", # Uses SIMD instructions
+  "sub_005D6C00", # Uses SIMD instructions
+  "sub_005D7038", # Uses SIMD instructions
+  "sub_005D78C0", # Uses SIMD instructions
+  "sub_005D78F0", # Uses SIMD instructions
+  "sub_005D7A70", # Uses SIMD instructions
+  "sub_005D8328", # Uses SIMD instructions
+  "sub_005D83C0", # Uses SIMD instructions
+  "sub_005D8430", # Uses SIMD instructions
+  "sub_005D8DB0", # Uses SIMD instructions
+  "sub_005D8E00", # Uses SIMD instructions
+]
+

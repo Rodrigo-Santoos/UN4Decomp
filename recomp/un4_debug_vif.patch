@@ -1,0 +1,48 @@
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index f872edd..e2dab74 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -1,3 +1,4 @@
++#include <iostream>
+ // Based on Blackline Interactive implementation
+ #include "runtime/ps2_memory.h"
+ #include <cstring>
+@@ -336,6 +337,18 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+         pos += 4;
+ 
+         uint8_t opcode = (cmd >> 24) & 0x7F;
++        {   // UN4Decomp: diagnostico - contagem dos comandos VIF1
++            static uint64_t s_counts[128] = {};
++            static uint64_t s_total = 0;
++            ++s_counts[opcode];
++            if ((++s_total % 20000u) == 0u)
++            {
++                std::cerr << "[un4] VIF1 " << s_total << " comandos:";
++                for (int i = 0; i < 128; ++i)
++                    if (s_counts[i]) std::cerr << " 0x" << std::hex << i << std::dec << "=" << s_counts[i];
++                std::cerr << std::endl;
++            }
++        }
+         uint16_t imm = cmd & 0xFFFF;
+         uint8_t num = (cmd >> 16) & 0xFF;
+         const bool irq = (cmd & 0x80000000u) != 0u;
+diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+index f19e281..a98b68b 100644
+--- a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
++++ b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+@@ -1,3 +1,4 @@
++#include <iostream>
+ #include "runtime/ps2_vu1.h"
+ #include "runtime/gs/ps2_gif_arbiter.h"
+ #include "runtime/gs/gs_frontend.h"
+@@ -932,6 +933,10 @@ void VU1Interpreter::startXgkick(uint32_t qwordAddress)
+         return;
+ 
+     const uint32_t sourceAddress = (qwordAddress * 16u) % m_activeVuDataSize;
++    {   // UN4Decomp: diagnostico
++        static uint64_t s_n = 0;
++        if ((++s_n % 500u) == 1u) std::cerr << "[un4] VU1 XGKICK #" << s_n << " addr=0x" << std::hex << qwordAddress << std::dec << std::endl;
++    }
+     m_xgkick = {};
+     m_xgkick.active = true;
+     m_xgkick.sourceAddress = sourceAddress;
